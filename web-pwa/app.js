@@ -323,9 +323,9 @@
         if (recvStatus) {
           recvStatus.innerHTML = `
             <span style="color:#10B981;font-weight:bold;">⚡ Direct Wi-Fi download initiated!</span><br>
-            <span style="font-size:12px;color:var(--text-muted);">Downloading directly from phone at <b>${phoneIp}:45455</b>.</span><br>
+            <span style="font-size:12px;color:var(--text-muted);">Streaming directly from sender phone over local Wi-Fi.</span><br>
             <a href="${directPortalUrl}" target="_blank" style="display:inline-block;margin-top:8px;color:var(--accent);text-decoration:underline;font-weight:600;">
-              Click here to view phone download page &rarr;
+              Open direct download portal &rarr;
             </a>
           `;
         }

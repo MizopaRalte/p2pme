@@ -905,44 +905,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     '$_activeDropFiles file(s) • ${(_activeDropBytes / 1024).toStringAsFixed(1)} KB ready',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
-                  const SizedBox(height: 14),
-
-                  // PC / Mac Browser Link Box
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.grey.shade400, width: 0.8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.computer, size: 16, color: Colors.blue),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            'http://${_localIpAddress ?? "192.168.178.35"}:$_webDropPort/drop?pin=$_activeDropPin',
-                            style: const TextStyle(fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.copy, size: 16),
-                          tooltip: 'Copy link',
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(
-                              text: 'http://${_localIpAddress ?? "192.168.178.35"}:$_webDropPort/drop?pin=$_activeDropPin',
-                            ));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Download link copied!')),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
 
                   // On-Screen QR Code for camera scanning (iPhone / iPad / PC)
                   Container(
@@ -1135,39 +1098,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
 
-                Container(
-                  constraints: const BoxConstraints(maxWidth: 320),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.wifi, size: 14, color: Colors.green),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          webUrl,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      InkWell(
-                        onTap: () {
-                          Clipboard.setData(ClipboardData(text: webUrl));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Upload link copied to clipboard!')),
-                          );
-                        },
-                        child: const Icon(Icons.copy, size: 14, color: Colors.blue),
-                      ),
-                    ],
-                  ),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.share, size: 16),
+                  label: const Text('Share Upload Link'),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: webUrl));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Upload link copied to clipboard!')),
+                    );
+                  },
                 ),
                 const SizedBox(height: 8),
                 Container(
