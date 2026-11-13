@@ -145,6 +145,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _webDropSessionToken = _generateSessionToken();
+    if (Platform.isAndroid) {
+      final sampleImg = File('/sdcard/Pictures/Screenshots/Screenshot_20260622-194857.jpg');
+      if (sampleImg.existsSync() && _selectedFilePaths.isEmpty) {
+        _selectedFilePaths.add(sampleImg.path);
+      }
+    }
     _initEngine();
     _checkBackgroundServiceStatus();
     _startWebDropServer();
@@ -959,8 +965,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
 
                   const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
                       OutlinedButton.icon(
                         icon: const Icon(Icons.copy, size: 16),
@@ -972,7 +981,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           );
                         },
                       ),
-                      const SizedBox(width: 8),
                       OutlinedButton.icon(
                         icon: const Icon(Icons.link, size: 16),
                         label: const Text('Copy Link'),
@@ -985,8 +993,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           );
                         },
                       ),
-                      if (_activeDropTicket != null) ...[
-                        const SizedBox(width: 8),
+                      if (_activeDropTicket != null)
                         IconButton(
                           icon: const Icon(Icons.share, size: 18),
                           tooltip: 'Copy P2P Ticket',
@@ -997,7 +1004,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             );
                           },
                         ),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 14),
