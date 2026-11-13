@@ -49,6 +49,7 @@ test_quickdrop_from_pc.pdf
 
 # Reference materials
 reference/
+.wrangler/
 
 # IDE / OS
 .idea/

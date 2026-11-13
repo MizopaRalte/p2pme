@@ -101,3 +101,46 @@ The local catalog tracks state persistently using SQLite with Write-Ahead Loggin
    * **Read-Only Ticket:** Can receive data and updates, but cannot sign or push file modifications.
    * **Pairing Expiration:** Temporary pairing codes / QR codes with configurable timeouts.
 
+---
+
+## 6. Distribution, Updates & Deployment Model
+
+P2Pme is architected to operate without mandatory app store monopolies, supporting frictionless peer distribution and transparent updates:
+
+### A. Web PWA (iOS & Desktop Browsers)
+* **Hosting:** Cloudflare Pages edge network (`https://p2pme.pages.dev`).
+* **Auto-Updates:** Service Worker (`sw.js`) with `self.skipWaiting()` and `self.clients.claim()` using a **Network-First** caching strategy. When a user opens the web app or iOS Home Screen PWA, updated assets are retrieved instantly in the background without user intervention.
+
+### B. Windows Portable Application
+* **Zero-Installation Architecture:** Distributed as a standalone zip archive (`P2Pme-Windows.zip`) containing `p2pme_app.exe` (Flutter desktop shell), `p2pme.exe` (Rust native engine daemon), and required runtime DLLs.
+* **No Elevated Privileges:** Runs entirely in user space without requiring administrator permissions, registry modification, or system hooks.
+* **Responsive Desktop Viewport:** Optimized desktop layout centered to 880px content width with ergonomic navigation.
+
+### C. Android Native Application
+* **Distribution:** Direct release APK (`P2Pme.apk` targeted at `arm64-v8a` and universal ABI).
+* **In-App Update Checker:** On startup or user request, the application queries `https://p2pme.pages.dev/version.json`. If a higher `version_code` is detected, a non-intrusive banner notifies the user with a 1-tap download and update link.
+
+---
+
+## 7. Nearby Wi-Fi Discovery & Pairing
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Phone as Mobile / Sender (Android/iOS)
+    participant Subnet as Local Wi-Fi Subnet (Broadcast)
+    participant Desktop as Computer / Receiver (Windows)
+
+    Note over Phone,Desktop: Both devices connected to same Wi-Fi
+    Desktop->>Subnet: UDP Broadcast on Port 42424 (P2Pme Beacon)
+    Note over Subnet: Payload: { p2pme: true, name: "PC", http_port: 45455, token: "..." }
+    Phone->>Subnet: Listen / Announce on Port 42424
+    Phone->>Desktop: Direct LAN HTTP Connection (Direct Drop / Folder Sync)
+    Desktop-->>Phone: TLS/Token Verified Transfer Stream
+```
+
+1. **UDP Broadcast Beacon:** Nodes on the local Wi-Fi subnet broadcast discovery packets on UDP port `42424` containing node name, endpoint, and dynamic session token.
+2. **Immediate 1-Tap Connection:** Nearby devices appear instantly in the UI with signal and IP metadata. Tapping connects directly via LAN wire-speed.
+3. **Dynamic IP Tolerance:** Device IP addresses (e.g., `192.168.x.x`) assigned by DHCP can change dynamically; the beacon protocol re-advertises new network endpoints automatically without requiring manual re-configuration.
+
+

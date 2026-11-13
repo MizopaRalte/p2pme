@@ -16,8 +16,10 @@
 **P2Pme** is a high-performance, decentralized data replication and drop engine. It combines two core workflows in a single, kid-friendly system:
 
 1. **Persistent Automatic Sync:** Continuous two-way synchronization, automated camera roll backups, and Storage-Saver Archive Mode across Windows, Mac, Linux, and Android.
-2. **One-Time Ephemeral Quick Drop:** Single-use, direct device-to-device transfers using 6-digit PIN codes or dynamic QR codes. Drops self-destruct immediately upon receipt without persistent directory tracking.
-3. **Zero-Install WebDrop & PWA:** Built-in local upload portal and standalone Cloudflare Pages Web PWA. Any iPhone, iPad, PC, or guest can send/receive files over Wi-Fi simply by scanning a QR code with their camera—**zero app installation required**.
+2. **Nearby Wi-Fi 1-Tap Pairing:** Discovers phones and PCs on the same Wi-Fi network instantly without scanning QR codes on monitors or typing tickets.
+3. **One-Time Ephemeral Quick Drop:** Single-use, direct device-to-device transfers using 6-digit PIN codes or dynamic QR codes. Drops self-destruct immediately upon receipt without persistent directory tracking.
+4. **Portable Windows Desktop App:** Zero installation required. Simply download, extract, and launch `p2pme_app.exe` (or `Launch_P2Pme.cmd`) for full desktop GUI and background replication.
+5. **Zero-Install WebDrop & PWA:** Built-in local upload portal and standalone Cloudflare Pages Web PWA. Any iPhone, iPad, PC, or guest can send/receive files over Wi-Fi simply by opening the web app—**zero app installation required** and **auto-updates on every launch**.
 
 ---
 
@@ -116,19 +118,19 @@ flutter build apk --debug
 adb install build/app/outputs/flutter-apk/app-debug.apk
 ```
 
-### 3. Windows PC Desktop CLI
+### 3. Windows Desktop App (Portable — No Install)
+* **Direct Download:** Download `P2Pme-Windows.zip` from [p2pme.pages.dev](https://p2pme.pages.dev)
+* **Launch GUI:** Extract the archive and double-click `Launch_P2Pme.cmd` or `p2pme_app.exe`.
+* **Interactive CLI / Server:** Double-click or run `p2pme.exe` in terminal for the interactive menu or CLI daemon:
 ```powershell
-# Build standalone binary
-cargo build --release -p p2pme-cli
-
 # Create a one-time Quick Drop
-target\release\p2pme.exe drop C:\path\to\file.pdf
+p2pme.exe drop C:\path\to\file.pdf
 
 # Receive a Quick Drop
-target\release\p2pme.exe receive <TICKET> C:\path\to\destination
+p2pme.exe receive <TICKET> C:\path\to\destination
 
 # Share a folder for persistent auto-sync (Camera Backup mode)
-target\release\p2pme.exe share C:\Photos --backup
+p2pme.exe share C:\Photos --backup
 ```
 
 ---

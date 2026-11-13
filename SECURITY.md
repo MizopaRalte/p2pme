@@ -35,6 +35,21 @@
   * Files are strictly written to the designated destination directory.
   * Executable file types (`.exe`, `.apk`, `.sh`, `.bat`) are blocked over browser upload portals.
 
+### D. OTA Updates & Software Supply Chain Security
+* **Risk:** Tampering with update packages or man-in-the-middle attacks on the update check.
+* **Mitigation:**
+  * **HTTPS Edge Delivery:** Update metadata (`version.json`) and release packages are delivered over TLS 1.3 via Cloudflare Pages edge network with HSTS enabled.
+  * **Origin Pinning:** The mobile and desktop clients strictly validate the update source against the official `https://p2pme.pages.dev` origin.
+  * **Zero Remote Execution:** The update checker only downloads the standalone APK or zip binary and never executes arbitrary remote scripts or dynamic code.
+
+### E. UDP Local Beacon Privacy
+* **Risk:** Sniffing UDP broadcast beacons on port 42424 on shared Wi-Fi networks.
+* **Mitigation:**
+  * Broadcast beacons contain only node display names and ephemeral receiver session tokens.
+  * No file names, folder structures, or device private keys are ever transmitted over broadcast beacons.
+  * Any transfer connection requires the ephemeral token and mutual user acceptance or pairing ticket verification.
+
+
 ---
 
 ## 3. Reporting a Vulnerability

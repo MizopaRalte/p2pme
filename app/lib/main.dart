@@ -209,6 +209,76 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<NearbyPeer> _nearbyPeers = [];
   bool _isScanningNearby = false;
 
+  // App Update Checker
+  static const int currentVersionCode = 2;
+  static const String currentVersionName = '1.0.1';
+  bool _updateAvailable = false;
+  String? _latestVersionName;
+  String? _updateReleaseNotes;
+  String? _updateDownloadUrl;
+  bool _isCheckingUpdates = false;
+
+  Future<void> _checkForAppUpdates({bool manual = false}) async {
+    if (_isCheckingUpdates) return;
+    setState(() => _isCheckingUpdates = true);
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.getUrl(Uri.parse('https://p2pme.pages.dev/version.json'));
+      final resp = await req.close();
+      if (resp.statusCode == HttpStatus.ok) {
+        final body = await utf8.decoder.bind(resp).join();
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        final remoteCode = (json['version_code'] ?? 1) as int;
+        final remoteName = json['version']?.toString() ?? '1.0.0';
+        final notes = json['release_notes']?.toString();
+        final targetUrl = Platform.isWindows
+            ? (json['windows_url']?.toString() ?? 'https://p2pme.pages.dev/downloads/P2Pme-Windows.zip')
+            : (json['apk_url']?.toString() ?? 'https://p2pme.pages.dev/downloads/P2Pme.apk');
+
+        if (mounted) {
+          setState(() {
+            _latestVersionName = remoteName;
+            _updateReleaseNotes = notes;
+            _updateDownloadUrl = targetUrl;
+            _updateAvailable = (remoteCode > currentVersionCode);
+          });
+          if (manual && !_updateAvailable) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('✓ P2Pme is up to date (v1.0.1)'),
+                backgroundColor: GooglePhotosColors.green,
+              ),
+            );
+          }
+        }
+      }
+    } catch (_) {
+      if (manual && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not reach update server.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingUpdates = false);
+      }
+    }
+  }
+
+  void _openDownloadUrl(String url) {
+    try {
+      if (Platform.isAndroid) {
+        Process.run('am', ['start', '-a', 'android.intent.action.VIEW', '-d', url]);
+      } else if (Platform.isWindows) {
+        Process.run('cmd', ['/c', 'start', '', url]);
+      } else if (Platform.isMacOS) {
+        Process.run('open', [url]);
+      } else if (Platform.isLinux) {
+        Process.run('xdg-open', [url]);
+      }
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
@@ -223,6 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _checkBackgroundServiceStatus();
     _startWebDropServer();
     _startNearbyBeacon();
+    _checkForAppUpdates();
   }
 
   @override
@@ -964,6 +1035,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -1063,35 +1135,110 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: _buildBody(),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (idx) => setState(() => _selectedIndex = idx),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.photo_outlined),
-            selectedIcon: Icon(Icons.photo),
-            label: 'Photos',
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 880),
+          child: Column(
+            children: [
+              if (_updateAvailable) _buildUpdateBanner(isDark),
+              Expanded(child: _buildBody()),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.wifi_tethering_outlined),
-            selectedIcon: Icon(Icons.wifi_tethering),
-            label: 'Nearby',
+        ),
+      ),
+      bottomNavigationBar: Center(
+        heightFactor: 1.0,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: NavigationBar(
+            selectedIndex: _selectedIndex,
+            onDestinationSelected: (idx) => setState(() => _selectedIndex = idx),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.photo_outlined),
+                selectedIcon: Icon(Icons.photo),
+                label: 'Photos',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.wifi_tethering_outlined),
+                selectedIcon: Icon(Icons.wifi_tethering),
+                label: 'Nearby',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.cloud_sync_outlined),
+                selectedIcon: Icon(Icons.cloud_sync),
+                label: 'Backup',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.folder_outlined),
+                selectedIcon: Icon(Icons.folder),
+                label: 'Folders',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.devices_outlined),
+                selectedIcon: Icon(Icons.devices),
+                label: 'Devices',
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.cloud_sync_outlined),
-            selectedIcon: Icon(Icons.cloud_sync),
-            label: 'Backup',
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUpdateBanner(bool isDark) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E3A2F) : const Color(0xFFE6F4EA),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: GooglePhotosColors.green.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.system_update_rounded, color: GooglePhotosColors.green, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Update available: v${_latestVersionName ?? ""}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                Text(
+                  _updateReleaseNotes ?? 'Tap to download the latest P2Pme version.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? const Color(0xFFBDC1C6) : const Color(0xFF5F6368),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.folder_outlined),
-            selectedIcon: Icon(Icons.folder),
-            label: 'Folders',
+          const SizedBox(width: 8),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: GooglePhotosColors.green,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+              minimumSize: const Size(60, 32),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            onPressed: () {
+              if (_updateDownloadUrl != null) {
+                _openDownloadUrl(_updateDownloadUrl!);
+              }
+            },
+            child: const Text('Update', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.devices_outlined),
-            selectedIcon: Icon(Icons.devices),
-            label: 'Devices',
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16),
+            onPressed: () => setState(() => _updateAvailable = false),
           ),
         ],
       ),
@@ -3548,6 +3695,19 @@ class _HomeScreenState extends State<HomeScreen> {
               _diagRow('Encryption', 'TLS 1.3 End-to-End'),
               _diagRow('Integrity Check', 'BLAKE3 Cryptographic Chunking'),
               _diagRow('Zero-Custody', 'Direct Peer-to-Peer (No Cloud Servers)'),
+              _diagRow('App Version', 'v$currentVersionName (build $currentVersionCode)'),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(40),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                ),
+                icon: _isCheckingUpdates
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Check for Updates', style: TextStyle(fontSize: 12)),
+                onPressed: _isCheckingUpdates ? null : () => _checkForAppUpdates(manual: true),
+              ),
               const SizedBox(height: 16),
               FilledButton(
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
