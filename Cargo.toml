@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "crates/p2pme-core",
+    "crates/p2pme-cli",
+    "crates/p2pme-ffi",
+]
+resolver = "2"
+

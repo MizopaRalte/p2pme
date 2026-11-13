@@ -1,0 +1,59 @@
+# P2Pme .gitignore
+
+# Rust / Cargo
+target/
+**/*.rs.bk
+*.pdb
+
+# Flutter / Dart
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages
+app/build/
+app/.pub-cache/
+app/.pub/
+
+# Android
+app/android/.gradle/
+app/android/local.properties
+app/android/**/build/
+app/android/captures/
+*.keystore
+*.jks
+
+# iOS / macOS
+app/ios/.symlinks/
+app/ios/Pods/
+app/ios/Podfile.lock
+app/ios/Flutter/Flutter.podspec
+app/ios/Flutter/Generated.xcconfig
+app/ios/Flutter/app.framework
+app/macos/Pods/
+
+# Test directories & Temporary Databases
+.p2pme/
+.p2pme_dest/
+demo_dest/
+demo_source/
+test_pc_*/
+received_drop/
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.tmp
+bf_test.txt
+lockout_test.txt
+test_quickdrop_from_pc.pdf
+
+# Reference materials
+reference/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+*.swp
+.DS_Store
+Thumbs.db

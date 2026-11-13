@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="P2Pme">
+  <meta name="theme-color" content="#0F172A">
+  <title>P2Pme - Pure Peer-to-Peer Transfer & Replication</title>
+  <link rel="manifest" href="manifest.json">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    :root {
+      --bg: #0F172A;
+      --card-bg: #1E293B;
+      --card-border: #334155;
+      --primary: #0284C7;
+      --primary-hover: #0369A1;
+      --accent: #38BDF8;
+      --success: #10B981;
+      --text: #F8FAFC;
+      --text-muted: #94A3B8;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    header {
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--card-border);
+      background: rgba(15, 23, 42, 0.8);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .logo-container { display: flex; align-items: center; gap: 12px; }
+    .logo-icon {
+      width: 38px;
+      height: 38px;
+      background: linear-gradient(135deg, #0284C7, #38BDF8);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: bold;
+      color: white;
+      box-shadow: 0 4px 12px rgba(2, 132, 199, 0.4);
+    }
+    .logo-text h1 { font-size: 19px; margin: 0; font-weight: 800; letter-spacing: -0.5px; }
+    .logo-text p { font-size: 11px; margin: 0; color: var(--text-muted); }
+    .status-badge {
+      font-size: 11px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+    main {
+      flex: 1;
+      padding: 18px;
+      max-width: 520px;
+      width: 100%;
+      margin: 0 auto;
+      padding-bottom: 90px;
+    }
+    .install-banner {
+      background: linear-gradient(135deg, rgba(2, 132, 199, 0.15), rgba(56, 189, 248, 0.05));
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 16px;
+      padding: 12px 16px;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .install-banner-text { font-size: 12px; color: var(--accent); }
+    .install-banner-btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 22px;
+      margin-bottom: 18px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+    .mode-toggle {
+      display: flex;
+      background: #0B1120;
+      border-radius: 14px;
+      padding: 4px;
+      margin-bottom: 20px;
+      border: 1px solid var(--card-border);
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .mode-btn.active {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);
+    }
+    .file-drop-area {
+      border: 2px dashed #475569;
+      border-radius: 16px;
+      padding: 24px;
+      text-align: center;
+      background: rgba(15, 23, 42, 0.5);
+      cursor: pointer;
+      margin-bottom: 16px;
+    }
+    .file-drop-area:hover { border-color: var(--accent); }
+    .file-drop-icon { font-size: 36px; margin-bottom: 8px; }
+    .chips-container { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .chip {
+      background: #334155;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .chip button {
+      background: transparent;
+      border: none;
+      color: #EF4444;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 0;
+    }
+    .action-btn {
+      width: 100%;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 14px;
+      padding: 16px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);
+    }
+    .action-btn:disabled {
+      background: #334155;
+      color: #64748B;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .action-btn.green { background: #059669; box-shadow: 0 4px 14px rgba(5, 150, 105, 0.4); }
+    .pin-container {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin: 18px 0;
+    }
+    .pin-digit {
+      width: 44px;
+      height: 54px;
+      background: #0B1120;
+      border: 1px solid #475569;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--accent);
+    }
+    .qr-box {
+      background: white;
+      padding: 14px;
+      border-radius: 16px;
+      display: inline-block;
+      margin: 14px auto;
+    }
+    .pin-input {
+      width: 100%;
+      background: #0B1120;
+      border: 1px solid #475569;
+      border-radius: 14px;
+      color: white;
+      font-size: 28px;
+      letter-spacing: 12px;
+      text-align: center;
+      padding: 14px;
+      font-weight: bold;
+      margin-bottom: 16px;
+    }
+    .progress-bar-container {
+      width: 100%;
+      height: 18px;
+      background: #334155;
+      border-radius: 9px;
+      overflow: hidden;
+      margin-top: 14px;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: var(--success);
+      font-size: 11px;
+      font-weight: bold;
+      line-height: 18px;
+      text-align: center;
+      color: white;
+      transition: width 0.2s;
+    }
+    .status-text { font-size: 13px; color: var(--text-muted); text-align: center; margin-top: 10px; }
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      justify-content: space-around;
+      padding: 10px 0;
+      z-index: 50;
+    }
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .nav-item.active { color: var(--accent); }
+    .nav-icon { font-size: 20px; }
+    .app-card {
+      background: #0B1120;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .app-card-title { font-weight: bold; font-size: 15px; margin-bottom: 2px; }
+    .app-card-desc { font-size: 12px; color: var(--text-muted); }
+    .app-card-btn {
+      background: var(--primary);
+      color: white;
+      padding: 8px 14px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header>
+    <div class="logo-container">
+      <div class="logo-icon">⚡</div>
+      <div class="logo-text">
+        <h1>P2Pme</h1>
+        <p>Pure Peer-to-Peer • 100% Private</p>
+      </div>
+    </div>
+    <div class="status-badge">DIRECT P2P</div>
+  </header>
+
+  <!-- Main View Area -->
+  <main>
+    <!-- iOS / PWA Add to Home Screen Hint -->
+    <div class="install-banner">
+      <div class="install-banner-text">
+        <strong>📱 Tip for iPhone:</strong> Tap Safari <strong>Share</strong> &rarr; <strong>Add to Home Screen</strong> to install P2Pme as an app!
+      </div>
+    </div>
+
+    <!-- TAB 1: QUICK DROP -->
+    <div id="viewDrop">
+      <div class="card">
+        <div class="mode-toggle">
+          <button class="mode-btn active" id="btnModeSend" onclick="setDropMode('send')">Send File(s)</button>
+          <button class="mode-btn" id="btnModeRecv" onclick="setDropMode('recv')">Receive</button>
+        </div>
+
+        <!-- Panel Send -->
+        <div id="panelSend">
+          <label class="file-drop-area" for="fileInput">
+            <div class="file-drop-icon">📁</div>
+            <div style="font-weight: bold; font-size: 15px; margin-bottom: 4px;">Choose Photos, Videos or Files</div>
+            <div style="font-size: 12px; color: var(--text-muted);">Zero-custody direct browser transfer</div>
+            <input type="file" id="fileInput" multiple style="display: none;">
+          </label>
+
+          <div class="chips-container" id="selectedList"></div>
+
+          <button class="action-btn" id="btnStartSend" disabled onclick="handleCreateDrop()">
+            🚀 Send with 6-Digit PIN & QR Code
+          </button>
+
+          <div class="hidden" style="text-align: center; margin-top: 18px;">
+            <div style="font-size: 13px; font-weight: bold; color: var(--text-muted);">ENTER THIS 6-DIGIT PIN ON RECEIVER:</div>
+            <div class="pin-container" id="pinDisplay"></div>
+            <div class="qr-box" id="sendQrContainer"></div>
+            <div style="font-size: 11px; color: var(--text-muted);">Or scan QR code with another phone camera</div>
+          </div>
+
+          <div class="progress-bar-container hidden" id="sendProgressCont">
+            <div class="progress-bar" id="sendProgressBar">0%</div>
+          </div>
+          <div class="status-text" id="sendStatus"></div>
+        </div>
+
+        <!-- Panel Receive -->
+        <div id="panelRecv" class="hidden">
+          <div style="font-size: 14px; font-weight: bold; margin-bottom: 10px;">Enter 6-Digit PIN from Sender:</div>
+          <input type="tel" class="pin-input" id="recvPinInput" maxlength="6" placeholder="______">
+
+          <button class="action-btn green" id="btnStartRecv" onclick="handleDownloadDrop()">
+            ⬇️ Download Drop Now
+          </button>
+
+          <div class="progress-bar-container hidden" id="recvProgressCont">
+            <div class="progress-bar" id="recvProgressBar">0%</div>
+          </div>
+          <div class="status-text" id="recvStatus"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: NEARBY PEERS -->
+    <div id="viewNearby" class="hidden">
+      <div class="card">
+        <h2 style="font-size: 18px; margin-top: 0;">Nearby Wi-Fi Peers</h2>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 18px;">
+          Devices on your local Wi-Fi with P2Pme open will appear here automatically.
+        </p>
+        <div id="nearbyPeersList"></div>
+      </div>
+    </div>
+
+    <!-- TAB 3: DOWNLOAD NATIVE APPS -->
+    <div id="viewApps" class="hidden">
+      <div class="card">
+        <h2 style="font-size: 18px; margin-top: 0;">Install Native Apps (Optional)</h2>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 18px;">
+          For maximum speed (110 MB/s), 24/7 background sync, and automatic camera roll backup, install our native app:
+        </p>
+
+        <!-- Android APK -->
+        <div class="app-card">
+          <div>
+            <div class="app-card-title">🤖 Android APK</div>
+            <div class="app-card-desc">24/7 Camera Auto-Sync • 110 MB/s</div>
+          </div>
+          <a class="app-card-btn" href="https://github.com/your-username/P2Pme/releases/latest/download/app-debug.apk" download>Download APK</a>
+        </div>
+
+        <!-- Windows PC -->
+        <div class="app-card">
+          <div>
+            <div class="app-card-title">💻 Windows PC</div>
+            <div class="app-card-desc">Desktop background daemon • p2pme.exe</div>
+          </div>
+          <a class="app-card-btn" href="https://github.com/your-username/P2Pme/releases/latest/download/p2pme.exe" download>Download .EXE</a>
+        </div>
+
+        <!-- iOS -->
+        <div class="app-card">
+          <div>
+            <div class="app-card-title">🍎 iPhone / iPad</div>
+            <div class="app-card-desc">Add to Home Screen (Instant PWA)</div>
+          </div>
+          <span style="font-size: 11px; color: var(--accent); font-weight: bold;">Tap Safari Share &rarr; Add</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" id="tabDrop" onclick="switchTab('drop')">
+      <span class="nav-icon">⚡</span>
+      <span>Quick Drop</span>
+    </button>
+    <button class="nav-item" id="tabNearby" onclick="switchTab('nearby')">
+      <span class="nav-icon">📡</span>
+      <span>Nearby</span>
+    </button>
+    <button class="nav-item" id="tabApps" onclick="switchTab('apps')">
+      <span class="nav-icon">📥</span>
+      <span>Native Apps</span>
+    </button>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
+

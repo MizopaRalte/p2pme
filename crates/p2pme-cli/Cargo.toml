@@ -1,0 +1,21 @@
+[package]
+name = "p2pme-cli"
+version = "0.1.0"
+edition = "2021"
+description = "P2Pme Command Line Interface & Daemon"
+
+[[bin]]
+name = "p2pme"
+path = "src/main.rs"
+
+[dependencies]
+p2pme-core = { path = "../p2pme-core" }
+tokio = { version = "1.38", features = ["full"] }
+clap = { version = "4.5", features = ["derive"] }
+indicatif = "0.17"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+qrcode = "0.14"
+blake3 = "1.5"
+rand = "0.8"
