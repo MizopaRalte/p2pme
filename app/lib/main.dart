@@ -12,26 +12,60 @@ void main() {
   runApp(const P2PmeApp());
 }
 
+class GooglePhotosColors {
+  static const blue = Color(0xFF1A73E8);
+  static const red = Color(0xFFEA4335);
+  static const yellow = Color(0xFFFBBC04);
+  static const green = Color(0xFF34A853);
+  static const blueSurface = Color(0xFFE8F0FE);
+  static const lightBg = Color(0xFFFFFFFF);
+  static const lightCard = Color(0xFFF8F9FA);
+  static const lightBorder = Color(0xFFDADCE0);
+  static const darkBg = Color(0xFF202124);
+  static const darkCard = Color(0xFF303134);
+  static const darkBorder = Color(0xFF3C4043);
+}
+
 class P2PmeApp extends StatelessWidget {
   const P2PmeApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'P2Pme',
+      title: 'Photos',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
+        scaffoldBackgroundColor: GooglePhotosColors.lightBg,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0066FF),
+          seedColor: GooglePhotosColors.blue,
+          primary: GooglePhotosColors.blue,
           brightness: Brightness.light,
+          surface: GooglePhotosColors.lightBg,
+          surfaceContainerHighest: GooglePhotosColors.lightCard,
+          outlineVariant: GooglePhotosColors.lightBorder,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: GooglePhotosColors.lightBg,
+          elevation: 0,
+          scrolledUnderElevation: 1,
         ),
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
+        scaffoldBackgroundColor: GooglePhotosColors.darkBg,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0066FF),
+          seedColor: const Color(0xFF8AB4F8),
+          primary: const Color(0xFF8AB4F8),
           brightness: Brightness.dark,
+          surface: GooglePhotosColors.darkBg,
+          surfaceContainerHighest: GooglePhotosColors.darkCard,
+          outlineVariant: GooglePhotosColors.darkBorder,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: GooglePhotosColors.darkBg,
+          elevation: 0,
+          scrolledUnderElevation: 1,
         ),
       ),
       themeMode: ThemeMode.system,
@@ -581,39 +615,98 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                Icons.hub,
-                color: Theme.of(context).colorScheme.primary,
-                size: 22,
+            // Google Photos style 4-color pinwheel indicator
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: Stack(
+                children: [
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.red, shape: BoxShape.circle)),
+                  ),
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.blue, shape: BoxShape.circle)),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.yellow, shape: BoxShape.circle)),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.green, shape: BoxShape.circle)),
+                  ),
+                ],
               ),
             ),
             const SizedBox(width: 12),
-            const Column(
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'P2Pme',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  'Photos',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 20,
+                    letterSpacing: -0.3,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFFE8EAED)
+                        : const Color(0xFF202124),
+                  ),
                 ),
                 Text(
-                  'Pure Peer-to-Peer • 100% Private',
-                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                  'Device backup & drop',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF9AA0A6)
+                        : const Color(0xFF5F6368),
+                  ),
                 ),
               ],
             ),
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'Network Diagnostics',
-            icon: const Icon(Icons.network_check),
-            onPressed: () => _showDiagnostics(context),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => _showDiagnostics(context),
+              child: Stack(
+                alignment: Alignment.bottomRight,
+                children: [
+                  CircleAvatar(
+                    radius: 17,
+                    backgroundColor: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF303134)
+                        : const Color(0xFFE8F0FE),
+                    child: const Icon(
+                      Icons.cloud_done_outlined,
+                      color: GooglePhotosColors.blue,
+                      size: 19,
+                    ),
+                  ),
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: GooglePhotosColors.green,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Theme.of(context).scaffoldBackgroundColor,
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -623,24 +716,24 @@ class _HomeScreenState extends State<HomeScreen> {
         onDestinationSelected: (idx) => setState(() => _selectedIndex = idx),
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.bolt_outlined),
-            selectedIcon: Icon(Icons.bolt),
-            label: 'Quick Drop',
+            icon: Icon(Icons.photo_outlined),
+            selectedIcon: Icon(Icons.photo),
+            label: 'Photos',
           ),
           NavigationDestination(
-            icon: Icon(Icons.folder_shared_outlined),
-            selectedIcon: Icon(Icons.folder_shared),
-            label: 'Auto-Sync',
+            icon: Icon(Icons.cloud_sync_outlined),
+            selectedIcon: Icon(Icons.cloud_sync),
+            label: 'Backup',
           ),
           NavigationDestination(
-            icon: Icon(Icons.add_circle_outline),
-            selectedIcon: Icon(Icons.add_circle),
-            label: 'Add Folder',
+            icon: Icon(Icons.folder_outlined),
+            selectedIcon: Icon(Icons.folder),
+            label: 'Folders',
           ),
           NavigationDestination(
-            icon: Icon(Icons.qr_code_scanner_outlined),
-            selectedIcon: Icon(Icons.qr_code_scanner),
-            label: 'Pair Device',
+            icon: Icon(Icons.devices_outlined),
+            selectedIcon: Icon(Icons.devices),
+            label: 'Devices',
           ),
         ],
       ),
@@ -671,43 +764,61 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Friendly banner
+          // Google Photos style Direct Transfer card
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).colorScheme.primaryContainer,
-                  Theme.of(context).colorScheme.surfaceContainerHighest,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? GooglePhotosColors.darkCard
+                  : GooglePhotosColors.lightCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? GooglePhotosColors.darkBorder
+                    : GooglePhotosColors.lightBorder,
               ),
-              borderRadius: BorderRadius.circular(18),
             ),
             child: Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
-                    color: Colors.amber.shade400,
-                    shape: BoxShape.circle,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF174EA6)
+                        : GooglePhotosColors.blueSurface,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.bolt, color: Colors.white, size: 28),
+                  child: const Icon(
+                    Icons.sync_alt_rounded,
+                    color: GooglePhotosColors.blue,
+                    size: 22,
+                  ),
                 ),
                 const SizedBox(width: 14),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'One-Time Quick Drop',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                        'Direct transfer',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? const Color(0xFFE8EAED)
+                              : const Color(0xFF202124),
+                        ),
                       ),
-                      SizedBox(height: 2),
+                      const SizedBox(height: 2),
                       Text(
-                        'Send files directly with a 6-digit PIN. Self-destructs when received!',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                        'Send photos and files directly to another phone or computer.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? const Color(0xFF9AA0A6)
+                              : const Color(0xFF5F6368),
+                        ),
                       ),
                     ],
                   ),
@@ -717,27 +828,27 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 16),
 
-          // Big Friendly Mode Toggle (Centered & Expanded for Kids & Easy Touch)
+          // Clean Mode Toggle (Send / Receive)
           Center(
             child: SegmentedButton<int>(
               expandedInsets: EdgeInsets.zero,
               segments: const [
                 ButtonSegment(
                   value: 0,
-                  label: Text('Send File(s)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  icon: Icon(Icons.arrow_upward_rounded),
+                  label: Text('Send', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  icon: Icon(Icons.arrow_upward_rounded, size: 18),
                 ),
                 ButtonSegment(
                   value: 1,
-                  label: Text('Receive', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  icon: Icon(Icons.arrow_downward_rounded),
+                  label: Text('Receive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  icon: Icon(Icons.arrow_downward_rounded, size: 18),
                 ),
               ],
               selected: {_quickDropTab},
               onSelectionChanged: (set) => setState(() => _quickDropTab = set.first),
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
 
           if (_quickDropTab == 0) _buildDropSendView() else _buildDropReceiveView(),
         ],
@@ -749,54 +860,68 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Visual File Picker Button
+        // File Selection Card
         Card(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+          color: Theme.of(context).brightness == Brightness.dark
+              ? GooglePhotosColors.darkCard
+              : Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            side: BorderSide(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? GooglePhotosColors.darkBorder
+                  : GooglePhotosColors.lightBorder,
+            ),
           ),
+          elevation: 0,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Option 1: Dedicated Camera Roll / DCIM Picker
+                // Option 1: Camera
                 FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: Colors.purple.shade700,
+                    backgroundColor: GooglePhotosColors.blue,
                     foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(52),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    minimumSize: const Size.fromHeight(50),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
                   ),
-                  icon: const Icon(Icons.photo_camera_rounded, size: 22),
-                  label: const FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      'Camera Photos (DCIM / Camera Roll)',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
+                  icon: const Icon(Icons.photo_camera_outlined, size: 20),
+                  label: const Text(
+                    'Camera photos',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                   ),
                   onPressed: _openCameraBackupPicker,
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '✨ Camera shots only • Excludes WhatsApp & memes',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  'Photos and videos from camera',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF9AA0A6)
+                        : const Color(0xFF5F6368),
+                  ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 10),
 
-                // Option 2: Browse all files / documents
+                // Option 2: Other files
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size.fromHeight(46),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(23)),
+                    side: BorderSide(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? GooglePhotosColors.darkBorder
+                          : GooglePhotosColors.lightBorder,
+                    ),
                   ),
-                  icon: const Icon(Icons.folder_open_rounded, size: 20),
+                  icon: const Icon(Icons.folder_open_outlined, size: 18),
                   label: const Text(
-                    'Browse Other Files & Documents...',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    'Other files',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
                   ),
                   onPressed: _pickFilesFromDevice,
                 ),
@@ -806,12 +931,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Selected (${_selectedFilePaths.length} items):',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        'Selected (${_selectedFilePaths.length})',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                       ),
                       TextButton(
                         onPressed: () => setState(() => _selectedFilePaths.clear()),
-                        child: const Text('Clear All'),
+                        child: const Text('Clear', style: TextStyle(color: GooglePhotosColors.blue)),
                       ),
                     ],
                   ),
@@ -824,9 +949,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       return Chip(
                         avatar: Icon(
                           name.endsWith('.jpg') || name.endsWith('.png')
-                              ? Icons.image
-                              : Icons.insert_drive_file,
-                          size: 18,
+                              ? Icons.image_outlined
+                              : Icons.insert_drive_file_outlined,
+                          size: 16,
+                          color: GooglePhotosColors.blue,
                         ),
                         label: Text(
                           name,
@@ -849,22 +975,20 @@ class _HomeScreenState extends State<HomeScreen> {
         // Action Button: Send with PIN
         FilledButton.icon(
           style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(56),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            minimumSize: const Size.fromHeight(50),
+            backgroundColor: GooglePhotosColors.blue,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
           ),
           icon: _isCreatingDrop
               ? const SizedBox(
-                  width: 22,
-                  height: 22,
+                  width: 18,
+                  height: 18,
                   child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                 )
-              : const Icon(Icons.rocket_launch_rounded),
+              : const Icon(Icons.send_rounded, size: 18),
           label: Text(
-            _isCreatingDrop
-                ? 'Creating Secure Drop...'
-                : 'Send with 6-Digit PIN & QR Code',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            _isCreatingDrop ? 'Preparing transfer...' : 'Send with PIN',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
           onPressed: _selectedFilePaths.isEmpty || _isCreatingDrop ? null : _handleCreateDrop,
         ),
@@ -1623,15 +1747,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.purple.shade50,
-                    border: Border.all(color: Colors.purple.shade300),
-                    borderRadius: BorderRadius.circular(6),
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF174EA6)
+                        : GooglePhotosColors.blueSurface,
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Text(
-                    'STORAGE SAVER',
-                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.purple),
+                    'Storage saver',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: GooglePhotosColors.blue),
                   ),
                 ),
               ],
@@ -1644,15 +1769,25 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(
                   '${folder.fileCount} files • ${folder.totalSizeMb.toStringAsFixed(1)} MB',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF9AA0A6)
+                        : const Color(0xFF5F6368),
+                  ),
                 ),
                 Row(
                   children: [
-                    const Icon(Icons.shield_outlined, size: 14, color: Colors.green),
+                    const Icon(Icons.check_circle_outline, size: 14, color: GooglePhotosColors.green),
                     const SizedBox(width: 4),
                     Text(
-                      'Deletions on phone stay on PC',
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.bold),
+                      'Backed up to computer',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? const Color(0xFF9AA0A6)
+                            : const Color(0xFF5F6368),
+                      ),
                     ),
                   ],
                 ),
@@ -1673,24 +1808,43 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Add Folder to Auto-Sync',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          Text(
+            'Backup folders',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.5,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFFE8EAED)
+                  : const Color(0xFF202124),
+            ),
           ),
-          const SizedBox(height: 6),
-          const Text(
-            'Choose a preset below or pick any custom directory on your device.',
-            style: TextStyle(color: Colors.grey, fontSize: 13),
+          const SizedBox(height: 4),
+          Text(
+            'Choose device folders to back up directly to your computer.',
+            style: TextStyle(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFF9AA0A6)
+                  : const Color(0xFF5F6368),
+              fontSize: 13,
+            ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
 
-          // Preset 1: Auto-Backup Camera Photos
+          // Preset 1: Auto-Backup Camera Photos (Google Photos Theme)
           Card(
-            color: Colors.purple.shade50,
+            color: Theme.of(context).brightness == Brightness.dark
+                ? GooglePhotosColors.darkCard
+                : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: Colors.purple.shade200),
+              side: BorderSide(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? GooglePhotosColors.darkBorder
+                    : GooglePhotosColors.lightBorder,
+              ),
             ),
+            elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(18),
               child: Column(
@@ -1701,23 +1855,40 @@ class _HomeScreenState extends State<HomeScreen> {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.purple.shade100,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? const Color(0xFF174EA6)
+                              : GooglePhotosColors.blueSurface,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: const Icon(Icons.photo_camera_rounded, color: Colors.purple, size: 28),
+                        child: const Icon(
+                          Icons.cloud_upload_outlined,
+                          color: GooglePhotosColors.blue,
+                          size: 24,
+                        ),
                       ),
-                      const SizedBox(width: 12),
-                      const Expanded(
+                      const SizedBox(width: 14),
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Auto-Backup Photos & Videos',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              'Back up photos & videos',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                                color: Theme.of(context).brightness == Brightness.dark
+                                    ? const Color(0xFFE8EAED)
+                                    : const Color(0xFF202124),
+                              ),
                             ),
                             Text(
-                              'Storage Saver: Free up phone space safely',
-                              style: TextStyle(fontSize: 11, color: Colors.purple),
+                              'Original quality to your computer',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context).brightness == Brightness.dark
+                                    ? const Color(0xFF9AA0A6)
+                                    : GooglePhotosColors.blue,
+                              ),
                             ),
                           ],
                         ),
@@ -1725,19 +1896,31 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Photos are backed up directly to your PC. Deleting photos on this phone will NEVER delete them from your PC backup!',
-                    style: TextStyle(fontSize: 12, color: Colors.black87),
+                  Text(
+                    'Photos back up directly to your computer over Wi-Fi. Free up space on your phone without losing your originals.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF9AA0A6)
+                          : const Color(0xFF5F6368),
+                      height: 1.4,
+                    ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
 
-                  // Scope selector: Camera Only vs All Media
+                  // Scope selector: Camera vs Device Folders
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF202124)
+                          : GooglePhotosColors.lightCard,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.purple.shade200),
+                      border: Border.all(
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? GooglePhotosColors.darkBorder
+                            : GooglePhotosColors.lightBorder,
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1746,13 +1929,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           segments: const [
                             ButtonSegment(
                               value: 0,
-                              label: Text('Camera Only', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              icon: Icon(Icons.photo_camera, size: 18),
+                              label: Text('Camera only', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                              icon: Icon(Icons.photo_camera_outlined, size: 18),
                             ),
                             ButtonSegment(
                               value: 1,
-                              label: Text('All Media', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              icon: Icon(Icons.perm_media, size: 18),
+                              label: Text('Device folders', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                              icon: Icon(Icons.perm_media_outlined, size: 18),
                             ),
                           ],
                           selected: {_cameraBackupScope},
@@ -1761,9 +1944,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 8),
                         Text(
                           _cameraBackupScope == 0
-                              ? '✨ Camera Photos Only: Clean backup from /DCIM/Camera (or iOS Camera Roll). Excludes WhatsApp memes & screenshots.'
-                              : '📁 All Media: Includes /DCIM + /Pictures + Screenshots.',
-                          style: TextStyle(fontSize: 11, color: Colors.purple.shade900),
+                              ? 'Camera roll (DCIM)'
+                              : 'Camera, screenshots, and downloads',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? const Color(0xFF9AA0A6)
+                                : const Color(0xFF5F6368),
+                          ),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -1772,11 +1960,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 14),
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: Colors.purple.shade700,
-                      minimumSize: const Size.fromHeight(46),
+                      backgroundColor: GooglePhotosColors.blue,
+                      minimumSize: const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                     ),
                     icon: const Icon(Icons.check, size: 18),
-                    label: const Text('Start Camera Backup (1-Tap Setup)'),
+                    label: const Text('Turn on backup', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                     onPressed: () {
                       final path = Platform.isAndroid
                           ? (_cameraBackupScope == 0
@@ -1805,7 +1994,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           _selectedIndex = 1;
                         });
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('$folderName activated!')),
+                          SnackBar(content: Text('$folderName active')),
                         );
                       }
                     },
@@ -2029,66 +2218,63 @@ class _HomeScreenState extends State<HomeScreen> {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Colors.purple.shade100,
-                        borderRadius: BorderRadius.circular(14),
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? const Color(0xFF174EA6)
+                            : GooglePhotosColors.blueSurface,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Icon(Icons.photo_camera_rounded, color: Colors.purple, size: 28),
+                      child: const Icon(
+                        Icons.photo_library_outlined,
+                        color: GooglePhotosColors.blue,
+                        size: 24,
+                      ),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Camera Roll / DCIM Picker',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          Text(
+                            'Camera',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? const Color(0xFFE8EAED)
+                                  : const Color(0xFF202124),
+                            ),
                           ),
                           Text(
                             cameraFiles.isNotEmpty
-                                ? '${cameraFiles.length} camera photos & videos detected'
-                                : (Platform.isAndroid ? 'Clean Camera Storage (/DCIM)' : 'Apple PhotoKit Camera Roll'),
-                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                ? '${cameraFiles.length} photos on device'
+                                : (Platform.isAndroid ? 'Camera folder (/DCIM)' : 'Camera roll'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? const Color(0xFF9AA0A6)
+                                  : const Color(0xFF5F6368),
+                            ),
                           ),
                         ],
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.purple.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.purple.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.verified, color: Colors.purple.shade700, size: 18),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          'Clean Camera Photos: Excludes WhatsApp memes, downloads & screenshots.',
-                          style: TextStyle(fontSize: 12, color: Colors.purple, fontWeight: FontWeight.w500),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
                 const SizedBox(height: 16),
                 if (cameraFiles.isNotEmpty) ...[
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: Colors.purple.shade700,
+                      backgroundColor: GooglePhotosColors.blue,
+                      foregroundColor: Colors.white,
                       minimumSize: const Size.fromHeight(48),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                     ),
-                    icon: const Icon(Icons.select_all_rounded, size: 20),
+                    icon: const Icon(Icons.check_circle_outline, size: 18),
                     label: FittedBox(
                       fit: BoxFit.scaleDown,
-                      child: Text('Select All Camera Photos (${cameraFiles.length})'),
+                      child: Text('Select all (${cameraFiles.length})', style: const TextStyle(fontWeight: FontWeight.w600)),
                     ),
                     onPressed: () {
                       Navigator.pop(ctx);
@@ -2100,7 +2286,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         }
                       });
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Added ${cameraFiles.length} camera photo(s) to Quick Drop!')),
+                        SnackBar(content: Text('Added ${cameraFiles.length} photos')),
                       );
                     },
                   ),
@@ -2109,12 +2295,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(44),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+                        side: BorderSide(
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? GooglePhotosColors.darkBorder
+                              : GooglePhotosColors.lightBorder,
+                        ),
                       ),
                       icon: const Icon(Icons.history_rounded, size: 18),
                       label: FittedBox(
                         fit: BoxFit.scaleDown,
-                        child: Text('Select Recent Photos (${min(10, cameraFiles.length)})'),
+                        child: Text('Select recent (${min(10, cameraFiles.length)})', style: const TextStyle(fontWeight: FontWeight.w500)),
                       ),
                       onPressed: () {
                         Navigator.pop(ctx);
@@ -2127,7 +2318,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           }
                         });
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Added ${min(10, cameraFiles.length)} recent camera photo(s)!')),
+                          SnackBar(content: Text('Added ${min(10, cameraFiles.length)} photos')),
                         );
                       },
                     ),
@@ -2136,13 +2327,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(46),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    minimumSize: const Size.fromHeight(44),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+                    side: BorderSide(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? GooglePhotosColors.darkBorder
+                          : GooglePhotosColors.lightBorder,
+                    ),
                   ),
-                  icon: const Icon(Icons.photo_library_outlined, size: 20),
+                  icon: const Icon(Icons.grid_view_rounded, size: 18),
                   label: const FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text('Pick Specific Photos in System Gallery...'),
+                    child: Text('Choose from gallery', style: TextStyle(fontWeight: FontWeight.w500)),
                   ),
                   onPressed: () async {
                     Navigator.pop(ctx);
@@ -2165,15 +2361,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 8),
                 FilledButton.tonalIcon(
                   style: FilledButton.styleFrom(
+                    backgroundColor: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF174EA6)
+                        : GooglePhotosColors.blueSurface,
+                    foregroundColor: GooglePhotosColors.blue,
                     minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                   ),
-                  icon: const Icon(Icons.sync_rounded, size: 20),
+                  icon: const Icon(Icons.cloud_upload_outlined, size: 20),
                   label: const FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      '⚡ Start Continuous Camera Sync to PC',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      'Back up to computer',
+                      style: TextStyle(fontWeight: FontWeight.w600),
                     ),
                   ),
                   onPressed: () {
@@ -2202,7 +2402,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         _selectedIndex = 1;
                       });
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Camera Backup auto-sync activated!')),
+                        const SnackBar(content: Text('Backup turned on')),
                       );
                     }
                   },

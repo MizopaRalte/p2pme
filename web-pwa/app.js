@@ -190,11 +190,11 @@
     }
 
     if (sendActiveBox) sendActiveBox.classList.remove('hidden');
-    if (sendStatus) sendStatus.innerText = `Session ready! Share PIN [${currentSessionPin}] with receiver.`;
+    if (sendStatus) sendStatus.innerText = `Enter PIN ${currentSessionPin} on the other device`;
     if (sendProgressCont) sendProgressCont.classList.remove('hidden');
     if (sendProgressBar) {
       sendProgressBar.style.width = '0%';
-      sendProgressBar.innerText = 'Waiting for recipient...';
+      sendProgressBar.innerText = 'Waiting for connection...';
     }
 
     // Render QR Code
@@ -206,7 +206,7 @@
         text: dropUrl,
         width: 140,
         height: 140,
-        colorDark: "#0284C7",
+        colorDark: "#1A73E8",
         colorLight: "#FFFFFF",
         correctLevel: QRCode.CorrectLevel.M
       });
@@ -219,7 +219,7 @@
   window.copyDropPin = function() {
     if (!currentSessionPin) return;
     navigator.clipboard.writeText(currentSessionPin).then(() => {
-      alert(`PIN ${currentSessionPin} copied to clipboard!`);
+      alert(`PIN ${currentSessionPin} copied`);
     });
   };
 
@@ -227,7 +227,7 @@
     if (!currentSessionPin) return;
     const dropUrl = `${window.location.origin}${window.location.pathname}#pin=${currentSessionPin}`;
     navigator.clipboard.writeText(dropUrl).then(() => {
-      alert('Drop link copied to clipboard!');
+      alert('Link copied');
     });
   };
 
@@ -298,7 +298,7 @@
             recvProgressBar.innerText = '100%';
           }
           if (recvStatus) {
-            recvStatus.innerHTML = `<span style="color:#10B981;font-weight:bold;">🎉 Received ${files[0].name} (${(files[0].size / 1024).toFixed(1)} KB) directly!</span>`;
+            recvStatus.innerHTML = `<span style="color:#34A853;font-weight:500;">Downloaded ${files[0].name}</span>`;
           }
         }, 600);
         return;
@@ -312,7 +312,7 @@
 
       if (recvProgressBar) {
         recvProgressBar.style.width = '60%';
-        recvProgressBar.innerText = 'Streaming from phone...';
+        recvProgressBar.innerText = 'Transferring...';
       }
 
       // Initiate actual file download link
@@ -330,10 +330,10 @@
         }
         if (recvStatus) {
           recvStatus.innerHTML = `
-            <span style="color:#10B981;font-weight:bold;">⚡ Direct Wi-Fi download initiated!</span><br>
-            <span style="font-size:12px;color:var(--text-muted);">Streaming directly from sender phone over local Wi-Fi.</span><br>
-            <a href="${directPortalUrl}" target="_blank" style="display:inline-block;margin-top:8px;color:var(--accent);text-decoration:underline;font-weight:600;">
-              Open direct download portal &rarr;
+            <span style="color:#34A853;font-weight:500;">Download started</span><br>
+            <span style="font-size:12px;color:var(--text-muted);">Transferring directly over local Wi-Fi</span><br>
+            <a href="${directPortalUrl}" target="_blank" style="display:inline-block;margin-top:8px;color:var(--accent);text-decoration:underline;font-weight:500;">
+              Open direct download link &rarr;
             </a>
           `;
         }
@@ -342,7 +342,7 @@
     }
 
     if (recvStatus) {
-      recvStatus.innerHTML = `<span style="color:#EF4444;font-weight:bold;">Could not locate phone or web peer for PIN [${pin}].</span>`;
+      recvStatus.innerHTML = `<span style="color:#EA4335;font-weight:500;">Device not found. Make sure both devices are on the same Wi-Fi.</span>`;
     }
   };
 
