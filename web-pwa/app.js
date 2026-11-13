@@ -112,7 +112,15 @@
     });
   }
 
-  // File Selection via file input
+  // File Selection via file input & camera roll input
+  const cameraInput = document.getElementById('cameraInput');
+  if (cameraInput) {
+    cameraInput.addEventListener('change', (e) => {
+      selectedFiles = Array.from(e.target.files);
+      renderSelectedFiles();
+    });
+  }
+
   if (fileInput) {
     fileInput.addEventListener('change', (e) => {
       selectedFiles = Array.from(e.target.files);
