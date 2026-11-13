@@ -33,7 +33,7 @@ app/macos/Pods/
 
 # Test directories & Temporary Databases
 .p2pme/
-.p2pme_dest/
+.p2pme_*/
 demo_dest/
 demo_source/
 test_pc_*/

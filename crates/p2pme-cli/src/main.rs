@@ -9,10 +9,10 @@ use tracing_subscriber::EnvFilter;
 #[command(name = "p2pme", about = "Decentralized P2P data replication and streaming engine")]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum Commands {
     /// Show or initialize local node identity
     Init {
@@ -90,6 +90,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Some(cmd) => execute_command(cmd).await,
+        None => run_interactive().await,
+    }
+}
+
+async fn execute_command(cmd: Commands) -> Result<()> {
+    match cmd {
         Commands::Init { db_dir } => {
             let node = P2PNode::new(&db_dir, 0).await?;
             println!("========================================================");
@@ -274,3 +281,191 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn prompt_line(prompt: &str) -> String {
+    use std::io::{self, Write};
+    print!("{}", prompt);
+    let _ = io::stdout().flush();
+    let mut input = String::new();
+    match io::stdin().read_line(&mut input) {
+        Ok(0) => "0".to_string(), // EOF: exit cleanly
+        Ok(_) => input.trim().to_string(),
+        Err(_) => "0".to_string(),
+    }
+}
+
+fn press_enter_to_exit() {
+    use std::io::{self, Write};
+    print!("\nPress Enter to exit...");
+    let _ = io::stdout().flush();
+    let mut input = String::new();
+    let _ = io::stdin().read_line(&mut input);
+}
+
+fn find_gui_executable() -> Option<PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("p2pme_app.exe");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    let candidate = PathBuf::from("p2pme_app.exe");
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    let runner_candidate = PathBuf::from("app/build/windows/x64/runner/Release/p2pme_app.exe");
+    if runner_candidate.exists() {
+        return Some(runner_candidate);
+    }
+    None
+}
+
+async fn run_interactive() -> Result<()> {
+    println!("========================================================");
+    println!("  P2Pme - Secure Direct Photo & Folder Sync");
+    println!("  Decentralized P2P replication engine");
+    println!("========================================================");
+
+    let gui_path = find_gui_executable();
+    if let Some(ref path) = gui_path {
+        println!("Desktop GUI detected: {:?}", path);
+    }
+
+    loop {
+        println!("\nSelect an action:");
+        println!("  1) Launch Desktop GUI (p2pme_app.exe)");
+        println!("  2) Share a folder (Generate Pairing Ticket & QR code)");
+        println!("  3) Join a shared folder (Sync with phone or PC)");
+        println!("  4) Quick Drop files (One-time transfer with PIN)");
+        println!("  5) Receive Quick Drop files");
+        println!("  6) Show Node Identity");
+        println!("  0) Exit");
+
+        let choice = prompt_line("\nEnter choice [0-6]: ");
+        match choice.as_str() {
+            "1" => {
+                if let Some(ref path) = gui_path {
+                    println!("Launching P2Pme Desktop GUI...");
+                    let _ = std::process::Command::new(path).spawn();
+                    println!("Application started. This console will now close.");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+                    return Ok(());
+                } else {
+                    println!("\nP2Pme Desktop GUI (p2pme_app.exe) was not found in the current directory.");
+                    println!("You can download the full Windows package with GUI from https://p2pme.pages.dev");
+                }
+            }
+            "2" => {
+                let path_str = prompt_line("Enter folder path to share: ");
+                if path_str.is_empty() {
+                    println!("Folder path cannot be empty.");
+                    continue;
+                }
+                let path = PathBuf::from(path_str);
+                let mode_str = prompt_line("Mode [1=Two-Way, 2=Read-Only, 3=Archive (Storage Saver)]: ");
+                let (ro, archive) = match mode_str.as_str() {
+                    "2" => (true, false),
+                    "3" => (false, true),
+                    _ => (false, false),
+                };
+                let cmd = Commands::Share {
+                    path,
+                    folder_id: None,
+                    ro,
+                    archive,
+                    backup: false,
+                    port: 0,
+                    db_dir: PathBuf::from(".p2pme"),
+                };
+                if let Err(e) = execute_command(cmd).await {
+                    eprintln!("Error sharing folder: {}", e);
+                }
+                press_enter_to_exit();
+                return Ok(());
+            }
+            "3" => {
+                let ticket = prompt_line("Paste Pairing Ticket: ");
+                if ticket.is_empty() {
+                    println!("Ticket cannot be empty.");
+                    continue;
+                }
+                let dest_str = prompt_line("Destination folder [default: ./P2PmeSync]: ");
+                let destination = if dest_str.is_empty() {
+                    PathBuf::from("P2PmeSync")
+                } else {
+                    PathBuf::from(dest_str)
+                };
+                let cmd = Commands::Join {
+                    ticket,
+                    destination,
+                    port: 0,
+                    db_dir: PathBuf::from(".p2pme"),
+                };
+                if let Err(e) = execute_command(cmd).await {
+                    eprintln!("Error synchronizing folder: {}", e);
+                }
+                press_enter_to_exit();
+                return Ok(());
+            }
+            "4" => {
+                let files_str = prompt_line("Enter file path(s) to send (separated by comma): ");
+                let files: Vec<PathBuf> = files_str
+                    .split(',')
+                    .map(|s| PathBuf::from(s.trim()))
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .collect();
+                if files.is_empty() {
+                    println!("No files provided.");
+                    continue;
+                }
+                let cmd = Commands::Drop {
+                    files,
+                    port: 0,
+                    db_dir: PathBuf::from(".p2pme"),
+                };
+                if let Err(e) = execute_command(cmd).await {
+                    eprintln!("Error creating drop: {}", e);
+                }
+                press_enter_to_exit();
+                return Ok(());
+            }
+            "5" => {
+                let ticket = prompt_line("Enter Drop Ticket or PIN: ");
+                let dest_str = prompt_line("Destination folder [default: .]: ");
+                let destination = if dest_str.is_empty() {
+                    PathBuf::from(".")
+                } else {
+                    PathBuf::from(dest_str)
+                };
+                let cmd = Commands::Receive {
+                    ticket,
+                    pin: None,
+                    destination,
+                    port: 0,
+                    db_dir: PathBuf::from(".p2pme"),
+                };
+                if let Err(e) = execute_command(cmd).await {
+                    eprintln!("Error receiving drop: {}", e);
+                }
+                press_enter_to_exit();
+                return Ok(());
+            }
+            "6" => {
+                let cmd = Commands::Init {
+                    db_dir: PathBuf::from(".p2pme"),
+                };
+                if let Err(e) = execute_command(cmd).await {
+                    eprintln!("Error initializing node: {}", e);
+                }
+            }
+            "0" | "exit" | "q" => {
+                println!("Exiting P2Pme.");
+                return Ok(());
+            }
+            _ => {
+                println!("Invalid option. Please enter 0-6.");
+            }
+        }
+    }
+}
