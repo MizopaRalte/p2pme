@@ -328,9 +328,18 @@
     window.handleDownloadDrop();
   };
 
-  // URL Hash auto-fill (e.g. #pin=123456 from QR scan)
+  // URL Hash auto-fill & deep-linking
   window.addEventListener('DOMContentLoaded', () => {
     const hash = window.location.hash;
+    if (hash.includes('tab=nearby')) {
+      window.switchTab('nearby');
+    } else if (hash.includes('tab=apps')) {
+      window.switchTab('apps');
+    } else if (hash.includes('mode=recv')) {
+      window.switchTab('drop');
+      window.setDropMode('recv');
+    }
+
     if (hash.includes('pin=')) {
       const pin = hash.split('pin=')[1].substring(0, 6);
       window.switchTab('drop');
