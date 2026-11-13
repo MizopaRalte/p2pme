@@ -28,7 +28,7 @@ git add .
 git commit -m "feat: initial commit of P2Pme core engine, Flutter app, and Cloudflare Web PWA"
 
 # Link to your remote GitHub repo
-git remote add origin https://github.com/<YOUR-USERNAME>/P2Pme.git
+git remote add origin https://github.com/MizopaRalte/p2pme.git
 
 # Push to main branch
 git push -u origin main
@@ -83,8 +83,8 @@ To give friends, family, and yourself a 1-tap download link for the native APK a
 
 ### Step 3: Direct Download Links
 Your friends and family can now download the apps directly:
-* **Android APK:** `https://github.com/<YOUR-USERNAME>/P2Pme/releases/latest/download/P2Pme.apk`
-* **Windows PC:** `https://github.com/<YOUR-USERNAME>/P2Pme/releases/latest/download/p2pme.exe`
+* **Android APK:** `https://github.com/MizopaRalte/p2pme/releases/latest/download/P2Pme.apk`
+* **Windows PC:** `https://github.com/MizopaRalte/p2pme/releases/latest/download/p2pme.exe`
 
 These direct links can also be pasted directly into `web-pwa/index.html` on the **Native Apps** tab.
 
@@ -97,3 +97,4 @@ iPhone users do **not** need the App Store:
 2. They open the link in Safari.
 3. They tap the **Share** button (the square with an arrow pointing up) &rarr; tap **Add to Home Screen**.
 4. P2Pme appears as a standalone app icon on their iPhone home screen, working full-screen with offline support!
+

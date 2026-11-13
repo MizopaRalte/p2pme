@@ -40,3 +40,4 @@
 ## 3. Reporting a Vulnerability
 
 If you discover a security issue or vulnerability in P2Pme, please report it privately via GitHub Security Advisories or by emailing the project maintainers.
+
