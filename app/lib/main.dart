@@ -84,6 +84,7 @@ class SyncFolderItem {
   final int fileCount;
   final double totalSizeMb;
   final double speedMb;
+  String? ticket;
 
   SyncFolderItem({
     required this.id,
@@ -95,6 +96,7 @@ class SyncFolderItem {
     required this.fileCount,
     required this.totalSizeMb,
     required this.speedMb,
+    this.ticket,
   });
 }
 
@@ -142,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final TextEditingController _pinInputController = TextEditingController();
   final TextEditingController _ticketInputController = TextEditingController();
+  final TextEditingController _pairTicketController = TextEditingController();
   String _receiveDestination = Platform.isAndroid
       ? '/storage/emulated/0/Download/P2Pme'
       : './received_drop';
@@ -193,6 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _pairTicketController.dispose();
     _stopWebDropServer();
     super.dispose();
   }
@@ -619,10 +623,24 @@ class _HomeScreenState extends State<HomeScreen> {
           : '.p2pme_mobile';
       final ready = P2PBridge.instance.initNode(dbDir, port: 0);
       if (ready) {
+        String? initialTicket;
+        try {
+          if (_folders.isNotEmpty) {
+            initialTicket = P2PBridge.instance.shareFolder(
+              _folders[0].localPath,
+              _folders[0].name,
+              syncMode: 2,
+            );
+          }
+        } catch (_) {}
+
         setState(() {
           _isEngineReady = true;
           _nodeId = P2PBridge.instance.getNodeId();
           _listeningPort = P2PBridge.instance.getPort();
+          if (initialTicket != null && _folders.isNotEmpty) {
+            _folders[0].ticket = initialTicket;
+          }
         });
       }
     } catch (_) {}
@@ -2009,6 +2027,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             fileCount: 342,
                             totalSizeMb: 1420.5,
                             speedMb: 78.4,
+                            ticket: ticket,
                           ));
                           _selectedIndex = 1;
                         });
@@ -2067,6 +2086,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               fileCount: 1,
                               totalSizeMb: 0.1,
                               speedMb: 50.0,
+                              ticket: ticket,
                             ));
                             _selectedIndex = 1;
                           });
@@ -2087,10 +2107,216 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ==========================================
-  // PAIR / SCAN SCREEN (JOIN EXISTING FOLDER)
+  // PAIR / DEVICES SCREEN (COMPUTER & DEVICE SYNC)
   // ==========================================
+  String? _getFolderTicket(SyncFolderItem folder) {
+    if (folder.ticket != null && folder.ticket!.isNotEmpty) {
+      return folder.ticket;
+    }
+    try {
+      final ticket = P2PBridge.instance.shareFolder(
+        folder.localPath,
+        folder.name,
+        syncMode: 2,
+      );
+      if (ticket != null) {
+        folder.ticket = ticket;
+      }
+      return ticket;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _showFolderQrDialog(SyncFolderItem folder) {
+    final ticket = _getFolderTicket(folder);
+    if (ticket == null || ticket.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not generate pairing ticket for this folder.')),
+      );
+      return;
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_2, color: GooglePhotosColors.blue),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                folder.name,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Scan this QR code from another phone or PC to pair with this folder.',
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: QrImageView(
+                data: ticket,
+                version: QrVersions.auto,
+                size: 190.0,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Or paste into PC terminal: p2pme join <ticket>',
+              style: TextStyle(
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: GooglePhotosColors.blue,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('Copy Ticket'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: ticket));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Pairing ticket copied! Run on PC: p2pme join <ticket>'),
+                  backgroundColor: GooglePhotosColors.blue,
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeviceFolderCard(SyncFolderItem folder, bool isDark) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      color: isDark ? const Color(0xFF202124) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isDark ? const Color(0xFF3C4043) : const Color(0xFFE8EAED),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: isDark ? const Color(0xFF1E2638) : GooglePhotosColors.blueSurface,
+                  child: const Icon(Icons.folder_outlined, color: GooglePhotosColors.blue),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        folder.name,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        folder.localPath,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      side: BorderSide(
+                        color: isDark ? const Color(0xFF3C4043) : const Color(0xFFDADCE0),
+                      ),
+                    ),
+                    icon: const Icon(Icons.copy, size: 15, color: GooglePhotosColors.blue),
+                    label: const Text('Copy Ticket', style: TextStyle(fontSize: 12)),
+                    onPressed: () {
+                      final ticket = _getFolderTicket(folder);
+                      if (ticket != null) {
+                        Clipboard.setData(ClipboardData(text: ticket));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Ticket copied! Run on PC: p2pme join <ticket>'),
+                            backgroundColor: GooglePhotosColors.blue,
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      side: BorderSide(
+                        color: isDark ? const Color(0xFF3C4043) : const Color(0xFFDADCE0),
+                      ),
+                    ),
+                    icon: const Icon(Icons.qr_code, size: 15, color: GooglePhotosColors.blue),
+                    label: const Text('Show QR', style: TextStyle(fontSize: 12)),
+                    onPressed: () => _showFolderQrDialog(folder),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPairScreen() {
-    final ticketController = TextEditingController();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -2098,33 +2324,122 @@ class _HomeScreenState extends State<HomeScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Join an Existing Shared Folder',
+            'Devices & Computer Sync',
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 6),
-          const Text(
-            'Paste a folder pairing ticket from another device to start syncing.',
-            style: TextStyle(color: Colors.grey, fontSize: 13),
+          Text(
+            'Pair your phone and computer for 24/7 background photo backup and continuous folder sync over local Wi-Fi.',
+            style: TextStyle(
+              color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+              fontSize: 13,
+            ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
+
+          // How it works card
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E2638) : GooglePhotosColors.blueSurface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark ? const Color(0xFF2C394F) : const Color(0xFFD2E3FC),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.devices,
+                      size: 20,
+                      color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'What is a Pairing Ticket?',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'A pairing ticket is a secure encryption key that connects a folder between your phone and computer. Unlike a one-time PIN, folders stay continuously synchronized.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.4,
+                    color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF3C4043),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '• From Computer: Run "p2pme share <folder>" on PC and paste the ticket below.\n• From Phone: Tap "Copy Ticket" on any phone folder below and run "p2pme join <ticket>" on PC.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    height: 1.5,
+                    fontFamily: 'monospace',
+                    color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+          const Text(
+            'Join Folder from Computer',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Paste the ticket generated by your PC to sync that folder to this phone:',
+            style: TextStyle(
+              color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 12),
           TextField(
-            controller: ticketController,
+            controller: _pairTicketController,
             maxLines: 3,
             decoration: InputDecoration(
               hintText: 'Paste folder pairing ticket here...',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.content_paste_outlined),
+                tooltip: 'Paste from clipboard',
+                onPressed: () async {
+                  final data = await Clipboard.getData(Clipboard.kTextPlain);
+                  if (!mounted) return;
+                  if (data?.text != null && data!.text!.isNotEmpty) {
+                    setState(() {
+                      _pairTicketController.text = data.text!.trim();
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Ticket pasted from clipboard')),
+                    );
+                  }
+                },
+              ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              backgroundColor: GooglePhotosColors.blue,
+              minimumSize: const Size.fromHeight(50),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
             ),
             icon: const Icon(Icons.sync),
-            label: const Text('Join & Start Syncing'),
+            label: const Text('Join & Start Syncing', style: TextStyle(fontWeight: FontWeight.bold)),
             onPressed: () {
-              final t = ticketController.text.trim();
+              final t = _pairTicketController.text.trim();
               if (t.isNotEmpty) {
                 final targetPath = Platform.isAndroid
                     ? '/storage/emulated/0/Download/P2PmeSync'
@@ -2142,11 +2457,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       fileCount: 2,
                       totalSizeMb: 1.0,
                       speedMb: 48.5,
+                      ticket: t,
                     ));
+                    _pairTicketController.clear();
                     _selectedIndex = 1;
                   });
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Folder joined successfully!')),
+                    const SnackBar(
+                      content: Text('Folder joined successfully!'),
+                      backgroundColor: GooglePhotosColors.green,
+                    ),
                   );
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -2156,6 +2476,33 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             },
           ),
+
+          const SizedBox(height: 28),
+          const Text(
+            'Your Phone Folders (Share to PC)',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'To back up these phone folders to your computer, copy their ticket or display their QR code:',
+            style: TextStyle(
+              color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (_folders.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: Text(
+                  'No folders added yet. Go to Backup or Folders tab to add one.',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                ),
+              ),
+            )
+          else
+            ..._folders.map((folder) => _buildDeviceFolderCard(folder, isDark)),
         ],
       ),
     );
@@ -2417,6 +2764,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           fileCount: cameraFiles.isNotEmpty ? cameraFiles.length : 1,
                           totalSizeMb: 120.0,
                           speedMb: 85.0,
+                          ticket: ticket,
                         ));
                         _selectedIndex = 1;
                       });
