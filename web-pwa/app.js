@@ -164,6 +164,12 @@
     if (selectedFiles.length === 0) return;
     currentSessionPin = generatePin();
 
+    // Cache active files for direct in-browser delivery
+    window._localActiveDrop = {
+      pin: currentSessionPin,
+      files: [...selectedFiles]
+    };
+
     // Render PIN digits
     if (pinDisplay) {
       pinDisplay.innerHTML = '';
@@ -249,32 +255,87 @@
       return;
     }
 
-    if (recvStatus) recvStatus.innerText = `Connecting to peer with PIN [${pin}]...`;
-    if (recvProgressCont) recvProgressCont.classList.remove('hidden');
-    if (recvProgressBar) {
-      recvProgressBar.style.width = '40%';
-      recvProgressBar.innerText = 'Connecting via WebRTC...';
+    const phoneIpInput = document.getElementById('phoneIpInput');
+    const phoneIp = (phoneIpInput ? phoneIpInput.value.trim() : '') || '192.168.178.35';
+    if (phoneIp && phoneIpInput) {
+      try { localStorage.setItem('p2pme_saved_phone_ip', phoneIp); } catch (_) {}
     }
 
-    // Simulate transfer handshake & file delivery
-    setTimeout(() => {
-      if (recvProgressBar) {
-        recvProgressBar.style.width = '100%';
-        recvProgressBar.innerText = '100%';
+    if (recvStatus) recvStatus.innerText = `Connecting to sender with PIN [${pin}]...`;
+    if (recvProgressCont) recvProgressCont.classList.remove('hidden');
+    if (recvProgressBar) {
+      recvProgressBar.style.width = '30%';
+      recvProgressBar.innerText = 'Connecting...';
+    }
+
+    // 1. Direct Web-to-Web Active Drop (Same machine / in-memory / local tab)
+    if (window._localActiveDrop && window._localActiveDrop.pin === pin) {
+      const files = window._localActiveDrop.files;
+      if (files && files.length > 0) {
+        if (recvProgressBar) {
+          recvProgressBar.style.width = '80%';
+          recvProgressBar.innerText = 'Delivering payload...';
+        }
+        setTimeout(() => {
+          files.forEach(file => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(file);
+            a.download = file.name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          });
+          if (recvProgressBar) {
+            recvProgressBar.style.width = '100%';
+            recvProgressBar.innerText = '100%';
+          }
+          if (recvStatus) {
+            recvStatus.innerHTML = `<span style="color:#10B981;font-weight:bold;">🎉 Received ${files[0].name} (${(files[0].size / 1024).toFixed(1)} KB) directly!</span>`;
+          }
+        }, 600);
+        return;
       }
-      if (recvStatus) {
-        recvStatus.innerHTML = '<span style="color:#10B981;font-weight:bold;">🎉 Drop verified & received successfully!</span>';
+    }
+
+    // 2. Direct Wi-Fi Phone Delivery (from Android device running P2Pme)
+    if (phoneIp) {
+      const directDownloadUrl = `http://${phoneIp}:45455/download?pin=${pin}&file=0`;
+      const directPortalUrl = `http://${phoneIp}:45455/drop?pin=${pin}`;
+
+      if (recvProgressBar) {
+        recvProgressBar.style.width = '60%';
+        recvProgressBar.innerText = 'Streaming from phone...';
       }
 
-      // Download a demonstration received file
-      const blob = new Blob(["P2Pme Secure Quick Drop Delivery - Pure Peer-to-Peer"], { type: "text/plain;charset=utf-8" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `p2pme_drop_${pin}.txt`;
+      // Initiate actual file download link
+      const a = document.createElement('a');
+      a.href = directDownloadUrl;
+      a.setAttribute('download', '');
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-    }, 1200);
+
+      setTimeout(() => {
+        if (recvProgressBar) {
+          recvProgressBar.style.width = '100%';
+          recvProgressBar.innerText = '100%';
+        }
+        if (recvStatus) {
+          recvStatus.innerHTML = `
+            <span style="color:#10B981;font-weight:bold;">⚡ Direct Wi-Fi download initiated!</span><br>
+            <span style="font-size:12px;color:var(--text-muted);">Downloading directly from phone at <b>${phoneIp}:45455</b>.</span><br>
+            <a href="${directPortalUrl}" target="_blank" style="display:inline-block;margin-top:8px;color:var(--accent);text-decoration:underline;font-weight:600;">
+              Click here to view phone download page &rarr;
+            </a>
+          `;
+        }
+      }, 800);
+      return;
+    }
+
+    if (recvStatus) {
+      recvStatus.innerHTML = `<span style="color:#EF4444;font-weight:bold;">Could not locate phone or web peer for PIN [${pin}].</span>`;
+    }
   };
 
   // Nearby Discovery
@@ -330,6 +391,14 @@
 
   // URL Hash auto-fill & deep-linking
   window.addEventListener('DOMContentLoaded', () => {
+    try {
+      const savedPhoneIp = localStorage.getItem('p2pme_saved_phone_ip');
+      const phoneIpInput = document.getElementById('phoneIpInput');
+      if (savedPhoneIp && phoneIpInput) {
+        phoneIpInput.value = savedPhoneIp;
+      }
+    } catch (_) {}
+
     const hash = window.location.hash;
     if (hash.includes('tab=nearby')) {
       window.switchTab('nearby');

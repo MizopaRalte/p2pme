@@ -594,6 +594,18 @@
 
           <input type="tel" class="pin-input" id="recvPinInput" maxlength="6" placeholder="______">
 
+          <!-- Direct Wi-Fi Phone Source Settings -->
+          <div style="margin: 0 auto 18px auto; max-width: 360px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; font-size: 12px; text-align: left;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+              <span style="font-weight: 600; color: var(--text);">📱 Phone on Local Wi-Fi:</span>
+              <span style="color: var(--accent); font-size: 11px;">Direct P2P</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input type="text" id="phoneIpInput" value="192.168.178.35" placeholder="Phone IP (e.g. 192.168.178.35)" style="flex: 1; background: #1E293B; border: 1px solid #475569; color: white; padding: 6px 10px; border-radius: 8px; font-family: monospace; font-size: 13px;">
+              <span style="color: var(--text-muted); font-size: 12px;">:45455</span>
+            </div>
+          </div>
+
           <button class="action-btn green" id="btnStartRecv" onclick="handleDownloadDrop()">
             ⬇️ Download Drop Now
           </button>
@@ -601,7 +613,7 @@
           <div class="progress-bar-container hidden" id="recvProgressCont">
             <div class="progress-bar" id="recvProgressBar">0%</div>
           </div>
-          <div style="font-size: 13px; color: var(--text-muted); text-align: center; margin-top: 10px;" id="recvStatus"></div>
+          <div style="font-size: 13px; color: var(--text-muted); text-align: center; margin-top: 14px; line-height: 1.5;" id="recvStatus"></div>
         </div>
       </div>
     </div>

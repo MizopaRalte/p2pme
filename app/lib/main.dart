@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:file_picker/file_picker.dart';
@@ -205,13 +206,115 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // 128-bit Ephemeral Token Verification
+    // Ephemeral Token & Drop PIN Verification
     final token = request.uri.queryParameters['token'] ?? request.headers.value('x-p2pme-token');
-    if (token != _webDropSessionToken) {
+    final pin = request.uri.queryParameters['pin'];
+
+    final bool isTokenValid = (token != null && token == _webDropSessionToken);
+    final bool isPinValid = (pin != null && _activeDropPin != null && pin == _activeDropPin);
+
+    // If neither token nor active PIN matches, block access with 403
+    if (!isTokenValid && !isPinValid) {
       request.response
         ..statusCode = HttpStatus.forbidden
         ..headers.contentType = ContentType.html
-        ..write('<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0F172A;color:#fff;"><h1>403 Forbidden</h1><p>Invalid or expired ephemeral drop token. Please scan the fresh QR code on the receiver screen.</p></body></html>');
+        ..write('<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0F172A;color:#fff;"><h1>403 Forbidden</h1><p>Invalid or expired drop PIN or token. Please check the code on the sender screen.</p></body></html>');
+      await request.response.close();
+      return;
+    }
+
+    // GET /drop or GET /?pin=... -> Web page to download active files
+    if (request.method == 'GET' && (request.uri.path == '/drop' || (request.uri.path == '/' && isPinValid))) {
+      request.response.headers.contentType = ContentType.html;
+      request.response.write(_buildDropDownloadHtml(pin ?? _activeDropPin!));
+      await request.response.close();
+      return;
+    }
+
+    // GET /download?pin=...&file=... -> Stream actual file binary payload
+    if (request.method == 'GET' && request.uri.path == '/download') {
+      final fileIndexStr = request.uri.queryParameters['file'] ?? '0';
+      final fileIndex = int.tryParse(fileIndexStr) ?? 0;
+
+      if (_selectedFilePaths.isEmpty || fileIndex < 0 || fileIndex >= _selectedFilePaths.length) {
+        request.response
+          ..statusCode = HttpStatus.notFound
+          ..write('File not found in active drop');
+        await request.response.close();
+        return;
+      }
+
+      final filePath = _selectedFilePaths[fileIndex];
+      final file = File(filePath);
+      if (!await file.exists()) {
+        request.response
+          ..statusCode = HttpStatus.notFound
+          ..write('File not found on device storage');
+        await request.response.close();
+        return;
+      }
+
+      final fileName = filePath.split(Platform.pathSeparator).last;
+      final fileLength = await file.length();
+
+      // Determine MIME type
+      String contentType = 'application/octet-stream';
+      final lower = fileName.toLowerCase();
+      if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+        contentType = 'image/jpeg';
+      } else if (lower.endsWith('.png')) {
+        contentType = 'image/png';
+      } else if (lower.endsWith('.gif')) {
+        contentType = 'image/gif';
+      } else if (lower.endsWith('.webp')) {
+        contentType = 'image/webp';
+      } else if (lower.endsWith('.pdf')) {
+        contentType = 'application/pdf';
+      } else if (lower.endsWith('.mp4')) {
+        contentType = 'video/mp4';
+      } else if (lower.endsWith('.zip')) {
+        contentType = 'application/zip';
+      } else if (lower.endsWith('.txt')) {
+        contentType = 'text/plain';
+      }
+
+      request.response.statusCode = HttpStatus.ok;
+      request.response.headers.contentType = ContentType.parse(contentType);
+      request.response.headers.set('Content-Disposition', 'attachment; filename="$fileName"');
+      request.response.headers.contentLength = fileLength;
+
+      await request.response.addStream(file.openRead());
+      await request.response.close();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.green.shade700,
+            content: Text('Delivered $fileName to recipient!'),
+          ),
+        );
+      }
+      return;
+    }
+
+    // GET /info?pin=... -> JSON metadata for Web PWA
+    if (request.method == 'GET' && request.uri.path == '/info') {
+      final fileInfos = _selectedFilePaths.map((p) {
+        final f = File(p);
+        final name = p.split(Platform.pathSeparator).last;
+        final size = f.existsSync() ? f.lengthSync() : 0;
+        return {'name': name, 'size': size};
+      }).toList();
+
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode({
+          'success': true,
+          'pin': _activeDropPin,
+          'fileCount': _selectedFilePaths.length,
+          'files': fileInfos,
+        }));
       await request.response.close();
       return;
     }
@@ -270,6 +373,58 @@ class _HomeScreenState extends State<HomeScreen> {
 
     request.response.statusCode = HttpStatus.notFound;
     await request.response.close();
+  }
+
+  String _buildDropDownloadHtml(String pin) {
+    final fileCards = _selectedFilePaths.asMap().entries.map((entry) {
+      final index = entry.key;
+      final path = entry.value;
+      final file = File(path);
+      final name = path.split(Platform.pathSeparator).last;
+      final size = file.existsSync() ? file.lengthSync() : 0;
+      final sizeStr = (size / 1024 > 1024)
+          ? '${(size / (1024 * 1024)).toStringAsFixed(1)} MB'
+          : '${(size / 1024).toStringAsFixed(1)} KB';
+      final safeName = htmlEscape.convert(name);
+      return '''
+      <div style="background: #1E293B; border: 1px solid #334155; border-radius: 14px; padding: 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; text-align: left;">
+        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">
+          <div style="font-weight: bold; font-size: 14px; color: #F8FAFC; overflow: hidden; text-overflow: ellipsis;">$safeName</div>
+          <div style="font-size: 12px; color: #94A3B8; margin-top: 2px;">$sizeStr</div>
+        </div>
+        <a href="/download?pin=$pin&file=$index" class="download-btn" style="padding: 10px 18px; font-size: 13px; width: auto; margin: 0; text-decoration: none;">⬇️ Download</a>
+      </div>
+      ''';
+    }).join('\n');
+
+    return '''
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>P2Pme Quick Drop - Download</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0F172A; color: #F8FAFC; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; }
+    .card { background: #1E293B; border-radius: 20px; padding: 28px; width: 100%; max-width: 460px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid #334155; text-align: center; box-sizing: border-box; }
+    h1 { font-size: 22px; margin-bottom: 6px; color: #38BDF8; }
+    p { color: #94A3B8; font-size: 14px; margin-top: 0; margin-bottom: 20px; }
+    .download-btn { display: inline-block; background: linear-gradient(135deg, #059669 0%, #10B981 100%); color: white; padding: 14px 28px; border-radius: 14px; font-size: 15px; font-weight: bold; cursor: pointer; border: none; text-decoration: none; box-sizing: border-box; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4); }
+    .download-btn:active { transform: scale(0.98); }
+    .badge { display: inline-block; background: #065F46; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 10px; border-radius: 20px; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">SECURE DIRECT WI-FI • ZERO CLOUD CUSTODY</div>
+    <h1>Quick Drop from Phone</h1>
+    <p>Incoming files ready for high-speed download:</p>
+    $fileCards
+    <div style="font-size: 11px; color: #64748B; margin-top: 14px;">PIN: $pin • Pure Peer-to-Peer Transfer</div>
+  </div>
+</body>
+</html>
+''';
   }
 
   String _buildWebDropHtml(String token) {
@@ -703,67 +858,105 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Large friendly PIN cards
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: _activeDropPin!.split('').map((digit) {
-                      return Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.primary,
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.06),
-                              blurRadius: 6,
-                              offset: const Offset(0, 3),
+                  // Large friendly PIN cards (FittedBox prevents any pixel overflow)
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: _activeDropPin!.split('').map((digit) {
+                        return Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.primary,
+                              width: 2,
                             ),
-                          ],
-                        ),
-                        child: Text(
-                          digit,
-                          style: TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.primary,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.06),
+                                blurRadius: 6,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
                           ),
-                        ),
-                      );
-                    }).toList(),
+                          child: Text(
+                            digit,
+                            style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
                   ),
                   const SizedBox(height: 14),
                   Text(
                     '$_activeDropFiles file(s) • ${(_activeDropBytes / 1024).toStringAsFixed(1)} KB ready',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
 
-                  // On-Screen QR Code for camera scanning
-                  if (_activeDropTicket != null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: QrImageView(
-                        data: _activeDropTicket!,
-                        version: QrVersions.auto,
-                        size: 160.0,
-                        backgroundColor: Colors.white,
-                      ),
+                  // PC / Mac Browser Link Box
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.grey.shade400, width: 0.8),
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Or scan this QR code with another phone',
-                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.computer, size: 16, color: Colors.blue),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            'http://${_localIpAddress ?? "192.168.178.35"}:$_webDropPort/drop?pin=$_activeDropPin',
+                            style: const TextStyle(fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.copy, size: 16),
+                          tooltip: 'Copy link',
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(
+                              text: 'http://${_localIpAddress ?? "192.168.178.35"}:$_webDropPort/drop?pin=$_activeDropPin',
+                            ));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Download link copied!')),
+                            );
+                          },
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // On-Screen QR Code for camera scanning (iPhone / iPad / PC)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: QrImageView(
+                      data: 'http://${_localIpAddress ?? "192.168.178.35"}:$_webDropPort/drop?pin=$_activeDropPin',
+                      version: QrVersions.auto,
+                      size: 160.0,
+                      backgroundColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Scan with iPhone or PC camera to download directly',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
 
                   const SizedBox(height: 16),
                   Row(
@@ -779,19 +972,32 @@ class _HomeScreenState extends State<HomeScreen> {
                           );
                         },
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       OutlinedButton.icon(
-                        icon: const Icon(Icons.share, size: 16),
-                        label: const Text('Copy Ticket'),
+                        icon: const Icon(Icons.link, size: 16),
+                        label: const Text('Copy Link'),
                         onPressed: () {
-                          if (_activeDropTicket != null) {
-                            Clipboard.setData(ClipboardData(text: _activeDropTicket!));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Drop ticket copied!')),
-                            );
-                          }
+                          Clipboard.setData(ClipboardData(
+                            text: 'http://${_localIpAddress ?? "192.168.178.35"}:$_webDropPort/drop?pin=$_activeDropPin',
+                          ));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Direct Wi-Fi link copied!')),
+                          );
                         },
                       ),
+                      if (_activeDropTicket != null) ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.share, size: 18),
+                          tooltip: 'Copy P2P Ticket',
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: _activeDropTicket!));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('P2P Drop Ticket copied!')),
+                            );
+                          },
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 14),
