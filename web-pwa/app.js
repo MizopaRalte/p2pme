@@ -116,15 +116,29 @@
   const cameraInput = document.getElementById('cameraInput');
   if (cameraInput) {
     cameraInput.addEventListener('change', (e) => {
-      selectedFiles = Array.from(e.target.files);
-      renderSelectedFiles();
+      const files = e.target.files ? Array.from(e.target.files) : [];
+      if (files.length === 0) return;
+      if (selectedList) {
+        selectedList.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Processing selected photos...</div>';
+      }
+      setTimeout(() => {
+        selectedFiles = files;
+        renderSelectedFiles();
+      }, 50);
     });
   }
 
   if (fileInput) {
     fileInput.addEventListener('change', (e) => {
-      selectedFiles = Array.from(e.target.files);
-      renderSelectedFiles();
+      const files = e.target.files ? Array.from(e.target.files) : [];
+      if (files.length === 0) return;
+      if (selectedList) {
+        selectedList.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Processing selected files...</div>';
+      }
+      setTimeout(() => {
+        selectedFiles = files;
+        renderSelectedFiles();
+      }, 50);
     });
   }
 
@@ -137,6 +151,22 @@
     }
     if (btnStartSend) btnStartSend.disabled = false;
 
+    // High volume batch (e.g. > 6 photos): Show compact summary card instead of 500+ DOM chips
+    if (selectedFiles.length > 6) {
+      const totalMb = (selectedFiles.reduce((sum, f) => sum + (f.size || 0), 0) / (1024 * 1024)).toFixed(1);
+      const summaryBox = document.createElement('div');
+      summaryBox.style.cssText = 'background: #303134; border: 1px solid var(--card-border); border-radius: 14px; padding: 12px 16px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;';
+      summaryBox.innerHTML = `
+        <div>
+          <div style="font-weight: 600; font-size: 14px; color: #E8EAED;">📷 ${selectedFiles.length} photos selected</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Total size: ~${totalMb} MB</div>
+        </div>
+        <button type="button" onclick="clearSelectedFiles()" style="background: rgba(234,67,53,0.15); color: #EA4335; border: 1px solid rgba(234,67,53,0.3); border-radius: 16px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 500;">Clear all</button>
+      `;
+      selectedList.appendChild(summaryBox);
+      return;
+    }
+
     selectedFiles.forEach((f, idx) => {
       const chip = document.createElement('div');
       chip.className = 'chip';
@@ -147,6 +177,13 @@
       selectedList.appendChild(chip);
     });
   }
+
+  window.clearSelectedFiles = function() {
+    selectedFiles = [];
+    if (cameraInput) cameraInput.value = '';
+    if (fileInput) fileInput.value = '';
+    renderSelectedFiles();
+  };
 
   window.removeFile = function(idx) {
     selectedFiles.splice(idx, 1);
