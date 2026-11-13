@@ -2337,47 +2337,45 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 18),
 
-          // How it works card
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E2638) : GooglePhotosColors.blueSurface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: isDark ? const Color(0xFF2C394F) : const Color(0xFFD2E3FC),
+          // Drill-down explanation (compact expandable, tap to open)
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+              childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              backgroundColor: isDark ? const Color(0xFF1E2638) : GooglePhotosColors.blueSurface,
+              collapsedBackgroundColor: isDark ? const Color(0xFF1E2638).withValues(alpha: 0.5) : GooglePhotosColors.blueSurface.withValues(alpha: 0.5),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: isDark ? const Color(0xFF2C394F) : const Color(0xFFD2E3FC)),
               ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.devices,
-                      size: 20,
-                      color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'What is a Pairing Ticket?',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
-                      ),
-                    ),
-                  ],
+              collapsedShape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: isDark ? const Color(0xFF2C394F) : const Color(0xFFD2E3FC)),
+              ),
+              leading: Icon(
+                Icons.help_outline_rounded,
+                size: 18,
+                color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
+              ),
+              title: Text(
+                'What is a pair ticket?',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
                 ),
-                const SizedBox(height: 8),
+              ),
+              children: [
                 Text(
-                  'A pairing ticket is a secure encryption key that connects a folder between your phone and computer. Unlike a one-time PIN, folders stay continuously synchronized.',
+                  'A pair ticket is a permanent sync key that connects a folder between your phone and computer. Unlike a 1-time PIN, folders stay continuously synchronized.',
                   style: TextStyle(
                     fontSize: 12,
                     height: 1.4,
                     color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF3C4043),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Text(
                   '• From Computer: Run "p2pme share <folder>" on PC and paste the ticket below.\n• From Phone: Tap "Copy Ticket" on any phone folder below and run "p2pme join <ticket>" on PC.',
                   style: TextStyle(
