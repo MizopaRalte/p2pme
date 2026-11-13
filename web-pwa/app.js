@@ -350,44 +350,70 @@
   const nearbyPeersList = document.getElementById('nearbyPeersList');
   function initNearbyScan() {
     if (!nearbyPeersList) return;
-    nearbyPeersList.innerHTML = '<div style="color:var(--text-muted);font-size:13px;grid-column:1/-1;">Searching for devices on local Wi-Fi...</div>';
+    nearbyPeersList.innerHTML = '';
 
-    // Broadcast self
+    const phoneIpInput = document.getElementById('phoneIpInput');
+    const phoneIp = (phoneIpInput ? phoneIpInput.value.trim() : '') || localStorage.getItem('p2pme_saved_phone_ip') || '192.168.178.35';
+
+    // Show local Wi-Fi transfer portal card
+    const portalCard = document.createElement('div');
+    portalCard.className = 'peer-card';
+    portalCard.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:16px;margin-bottom:12px;';
+    portalCard.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:40px;height:40px;border-radius:20px;background:var(--google-surface);display:flex;align-items:center;justify-content:center;font-size:20px;">
+          📱
+        </div>
+        <div style="text-align:left;">
+          <div style="font-weight:600;font-size:14px;color:var(--text);">Android Device (${phoneIp})</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Local Wi-Fi portal • Port 45455</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <a href="http://${phoneIp}:45455/" target="_blank" class="header-nav-btn" style="background:var(--google-blue);color:white;padding:8px 16px;border-radius:20px;text-decoration:none;font-size:13px;font-weight:500;">
+          Send Photos &rarr;
+        </a>
+      </div>
+    `;
+    nearbyPeersList.appendChild(portalCard);
+
+    // Tip box explaining how it connects
+    const infoBox = document.createElement('div');
+    infoBox.style.cssText = 'background:rgba(26,115,232,0.08);border:1px solid rgba(26,115,232,0.2);border-radius:12px;padding:14px;font-size:12px;color:var(--text);line-height:1.5;text-align:left;margin-top:12px;';
+    infoBox.innerHTML = `
+      <div style="font-weight:600;margin-bottom:6px;color:var(--accent);">How to transfer between iOS and Android:</div>
+      <div>&bull; <strong>Send from iPhone to Android:</strong> Open the app on Android &rarr; tap <strong>Receive</strong> &rarr; scan the QR code (or tap <strong>Send Photos &rarr;</strong> above).</div>
+      <div style="margin-top:4px;">&bull; <strong>Send from Android to iPhone:</strong> On Android, select photos &rarr; tap <strong>Send with PIN</strong> &rarr; enter the 6-digit PIN on this screen under <strong>Receive</strong>.</div>
+    `;
+    nearbyPeersList.appendChild(infoBox);
+
+    // Broadcast self on local channel
     if (localChannel) {
       localChannel.postMessage({
         type: 'PEER_PING',
         ua: navigator.userAgent.includes('iPhone') ? 'iPhone' : (navigator.userAgent.includes('Android') ? 'Android' : 'PC/Mac')
       });
     }
-
-    // Add a nearby phone avatar demonstration
-    setTimeout(() => {
-      addNearbyPeer({
-        ua: 'OnePlus 6T (Android 11)',
-        pin: '849201',
-        time: Date.now()
-      });
-    }, 800);
   }
 
   function addNearbyPeer(peer) {
     if (!nearbyPeersList) return;
-    const existingEmpty = nearbyPeersList.querySelector('div[style*="Searching"]');
-    if (existingEmpty) existingEmpty.remove();
-
     const card = document.createElement('div');
     card.className = 'peer-card';
+    card.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:16px;margin-bottom:10px;';
     card.innerHTML = `
-      <div class="peer-avatar">📱</div>
-      <div class="peer-info">
-        <div class="peer-name">${escapeHtml(peer.ua)}</div>
-        <div class="peer-meta">Active on Wi-Fi • PIN: ${peer.pin}</div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:36px;height:36px;border-radius:18px;background:var(--google-surface);display:flex;align-items:center;justify-content:center;font-size:18px;">📱</div>
+        <div style="text-align:left;">
+          <div style="font-weight:600;font-size:14px;color:var(--text);">${escapeHtml(peer.ua)}</div>
+          <div style="font-size:12px;color:var(--text-muted);">Active on Wi-Fi • PIN: ${peer.pin}</div>
+        </div>
       </div>
-      <button class="header-nav-btn" style="background:var(--primary);color:white;padding:6px 14px;" onclick="connectToPeer('${peer.pin}')">
+      <button class="header-nav-btn" style="background:var(--google-blue);color:white;padding:7px 16px;border-radius:20px;font-size:13px;font-weight:500;" onclick="connectToPeer('${peer.pin}')">
         Connect
       </button>
     `;
-    nearbyPeersList.appendChild(card);
+    nearbyPeersList.prepend(card);
   }
 
   window.connectToPeer = function(pin) {

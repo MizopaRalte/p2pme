@@ -247,33 +247,47 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // Ephemeral Token & Drop PIN Verification
     final token = request.uri.queryParameters['token'] ?? request.headers.value('x-p2pme-token');
     final pin = request.uri.queryParameters['pin'];
 
     final bool isTokenValid = (token != null && token == _webDropSessionToken);
     final bool isPinValid = (pin != null && _activeDropPin != null && pin == _activeDropPin);
 
-    // If neither token nor active PIN matches, block access with 403
-    if (!isTokenValid && !isPinValid) {
-      request.response
-        ..statusCode = HttpStatus.forbidden
-        ..headers.contentType = ContentType.html
-        ..write('<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0F172A;color:#fff;"><h1>403 Forbidden</h1><p>Invalid or expired drop PIN or token. Please check the code on the sender screen.</p></body></html>');
-      await request.response.close();
-      return;
-    }
-
-    // GET /drop or GET /?pin=... -> Web page to download active files
-    if (request.method == 'GET' && (request.uri.path == '/drop' || (request.uri.path == '/' && isPinValid))) {
+    // Root portal (GET / or GET /upload): Friendly Google Photos Wi-Fi transfer portal
+    if (request.method == 'GET' && (request.uri.path == '/' || request.uri.path == '/upload')) {
       request.response.headers.contentType = ContentType.html;
-      request.response.write(_buildDropDownloadHtml(pin ?? _activeDropPin!));
+      if (_activeDropPin != null && _selectedFilePaths.isNotEmpty) {
+        request.response.write(_buildDropDownloadHtml(_activeDropPin!));
+      } else {
+        request.response.write(_buildWebDropHtml(_webDropSessionToken));
+      }
       await request.response.close();
       return;
     }
 
-    // GET /download?pin=...&file=... -> Stream actual file binary payload
+    // GET /drop: Direct drop download portal
+    if (request.method == 'GET' && request.uri.path == '/drop') {
+      request.response.headers.contentType = ContentType.html;
+      if (isPinValid || _activeDropPin != null) {
+        request.response.write(_buildDropDownloadHtml(pin ?? _activeDropPin!));
+      } else {
+        request.response.write(_buildWebDropHtml(_webDropSessionToken));
+      }
+      await request.response.close();
+      return;
+    }
+
+    // GET /download?file=... -> Stream file payload
     if (request.method == 'GET' && request.uri.path == '/download') {
+      if (!isPinValid && !isTokenValid && _activeDropPin == null) {
+        request.response
+          ..statusCode = HttpStatus.forbidden
+          ..headers.contentType = ContentType.html
+          ..write('<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#202124;color:#E8EAED;"><h1>403 Forbidden</h1><p>Please check the PIN on the sender phone.</p></body></html>');
+        await request.response.close();
+        return;
+      }
+
       final fileIndexStr = request.uri.queryParameters['file'] ?? '0';
       final fileIndex = int.tryParse(fileIndexStr) ?? 0;
 
@@ -428,12 +442,12 @@ class _HomeScreenState extends State<HomeScreen> {
           : '${(size / 1024).toStringAsFixed(1)} KB';
       final safeName = htmlEscape.convert(name);
       return '''
-      <div style="background: #1E293B; border: 1px solid #334155; border-radius: 14px; padding: 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; text-align: left;">
+      <div style="background: #202124; border: 1px solid #3C4043; border-radius: 16px; padding: 14px 18px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; text-align: left;">
         <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">
-          <div style="font-weight: bold; font-size: 14px; color: #F8FAFC; overflow: hidden; text-overflow: ellipsis;">$safeName</div>
-          <div style="font-size: 12px; color: #94A3B8; margin-top: 2px;">$sizeStr</div>
+          <div style="font-weight: 600; font-size: 14px; color: #E8EAED; overflow: hidden; text-overflow: ellipsis;">$safeName</div>
+          <div style="font-size: 12px; color: #9AA0A6; margin-top: 2px;">$sizeStr</div>
         </div>
-        <a href="/download?pin=$pin&file=$index" class="download-btn" style="padding: 10px 18px; font-size: 13px; width: auto; margin: 0; text-decoration: none;">⬇️ Download</a>
+        <a href="/download?pin=$pin&file=$index" class="download-btn" style="padding: 10px 20px; font-size: 13px; font-weight: 500; border-radius: 20px; background: #1A73E8; color: white; text-decoration: none;">Download</a>
       </div>
       ''';
     }).join('\n');
@@ -444,24 +458,27 @@ class _HomeScreenState extends State<HomeScreen> {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>P2Pme Quick Drop - Download</title>
+  <title>Photos - Direct Download</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0F172A; color: #F8FAFC; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; }
-    .card { background: #1E293B; border-radius: 20px; padding: 28px; width: 100%; max-width: 460px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid #334155; text-align: center; box-sizing: border-box; }
-    h1 { font-size: 22px; margin-bottom: 6px; color: #38BDF8; }
-    p { color: #94A3B8; font-size: 14px; margin-top: 0; margin-bottom: 20px; }
-    .download-btn { display: inline-block; background: linear-gradient(135deg, #059669 0%, #10B981 100%); color: white; padding: 14px 28px; border-radius: 14px; font-size: 15px; font-weight: bold; cursor: pointer; border: none; text-decoration: none; box-sizing: border-box; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4); }
-    .download-btn:active { transform: scale(0.98); }
-    .badge { display: inline-block; background: #065F46; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 10px; border-radius: 20px; margin-bottom: 14px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #202124; color: #E8EAED; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; }
+    .card { background: #303134; border-radius: 24px; padding: 28px; width: 100%; max-width: 460px; border: 1px solid #3C4043; text-align: center; box-sizing: border-box; }
+    .dots { width: 32px; height: 32px; margin: 0 auto 12px auto; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    .dots div:nth-child(1) { background: #EA4335; border-radius: 50%; }
+    .dots div:nth-child(2) { background: #1A73E8; border-radius: 50%; }
+    .dots div:nth-child(3) { background: #FBBC04; border-radius: 50%; }
+    .dots div:nth-child(4) { background: #34A853; border-radius: 50%; }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; color: #E8EAED; }
+    p { color: #9AA0A6; font-size: 13px; margin-top: 0; margin-bottom: 20px; }
+    .download-btn:active { opacity: 0.85; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="badge">SECURE DIRECT WI-FI • ZERO CLOUD CUSTODY</div>
-    <h1>Quick Drop from Phone</h1>
-    <p>Incoming files ready for high-speed download:</p>
+    <div class="dots"><div></div><div></div><div></div><div></div></div>
+    <h1>Files from Android Phone</h1>
+    <p>Direct peer-to-peer download over Wi-Fi</p>
     $fileCards
-    <div style="font-size: 11px; color: #64748B; margin-top: 14px;">PIN: $pin • Pure Peer-to-Peer Transfer</div>
+    <div style="font-size: 12px; color: #9AA0A6; margin-top: 16px;">Transferring over local Wi-Fi</div>
   </div>
 </body>
 </html>
@@ -475,31 +492,34 @@ class _HomeScreenState extends State<HomeScreen> {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>P2Pme Quick Drop</title>
+  <title>Photos - Send to Android Phone</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0F172A; color: #F8FAFC; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; }
-    .card { background: #1E293B; border-radius: 20px; padding: 28px; width: 100%; max-width: 440px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid #334155; text-align: center; }
-    h1 { font-size: 24px; margin-bottom: 6px; color: #38BDF8; }
-    p { color: #94A3B8; font-size: 14px; margin-top: 0; margin-bottom: 24px; }
-    .upload-btn { display: inline-block; background: #0284C7; color: white; padding: 16px 32px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; border: none; width: 85%; margin-bottom: 16px; box-sizing: border-box; }
-    .upload-btn:active { background: #0369A1; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #202124; color: #E8EAED; margin: 0; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; }
+    .card { background: #303134; border-radius: 24px; padding: 28px; width: 100%; max-width: 440px; border: 1px solid #3C4043; text-align: center; }
+    .dots { width: 32px; height: 32px; margin: 0 auto 12px auto; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    .dots div:nth-child(1) { background: #EA4335; border-radius: 50%; }
+    .dots div:nth-child(2) { background: #1A73E8; border-radius: 50%; }
+    .dots div:nth-child(3) { background: #FBBC04; border-radius: 50%; }
+    .dots div:nth-child(4) { background: #34A853; border-radius: 50%; }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; color: #E8EAED; }
+    p { color: #9AA0A6; font-size: 13px; margin-top: 0; margin-bottom: 24px; }
+    .upload-btn { display: inline-block; background: #1A73E8; color: white; padding: 14px 28px; border-radius: 24px; font-size: 15px; font-weight: 600; cursor: pointer; border: none; width: 85%; margin-bottom: 16px; box-sizing: border-box; }
+    .upload-btn:active { background: #1557B0; }
     input[type="file"] { display: none; }
-    .progress-bar-container { width: 100%; height: 16px; background: #334155; border-radius: 8px; overflow: hidden; margin-top: 16px; display: none; }
-    .progress-bar { height: 100%; width: 0%; background: #10B981; border-radius: 8px; transition: width 0.2s; font-size: 11px; line-height: 16px; text-align: center; font-weight: bold; color: white; }
-    #status { margin-top: 16px; font-weight: 500; font-size: 14px; color: #E2E8F0; }
-    .badge { display: inline-block; background: #065F46; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 10px; border-radius: 20px; margin-bottom: 16px; }
-    .token-badge { font-size: 10px; color: #64748B; margin-top: 12px; }
+    .progress-bar-container { width: 100%; height: 16px; background: #202124; border-radius: 8px; overflow: hidden; margin-top: 16px; display: none; border: 1px solid #3C4043; }
+    .progress-bar { height: 100%; width: 0%; background: #34A853; border-radius: 8px; transition: width 0.2s; font-size: 11px; line-height: 16px; text-align: center; font-weight: 600; color: white; }
+    #status { margin-top: 16px; font-weight: 500; font-size: 13px; color: #E8EAED; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="badge">DIRECT WI-FI • 128-BIT TOKEN PROTECTED</div>
-    <h1>Send to Receiver</h1>
-    <p>Select photos, videos, or files from your iPhone / iPad or PC to stream directly to the receiver.</p>
+    <div class="dots"><div></div><div></div><div></div><div></div></div>
+    <h1>Send to Android Phone</h1>
+    <p>Select photos or videos to transfer directly over Wi-Fi without cloud storage.</p>
     
     <label class="upload-btn">
-      Choose Photos / Files
-      <input type="file" id="picker" multiple onchange="startUpload()">
+      Choose Photos & Videos
+      <input type="file" id="picker" accept="image/*,video/*" multiple onchange="startUpload()">
     </label>
 
     <div class="progress-bar-container" id="progCont">
@@ -507,7 +527,6 @@ class _HomeScreenState extends State<HomeScreen> {
     </div>
     
     <div id="status">Ready to send</div>
-    <div class="token-badge">Session Token: \${token.substring(0, 8)}••••••••</div>
   </div>
 
   <script>
@@ -524,7 +543,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        status.innerText = 'Sending ' + (i + 1) + '/' + files.length + ': ' + file.name + ' (' + (file.size / (1024 * 1024)).toFixed(1) + ' MB)...';
+        status.innerText = 'Transferring ' + (i + 1) + ' of ' + files.length + ': ' + file.name + ' (' + (file.size / (1024 * 1024)).toFixed(1) + ' MB)...';
         progBar.style.width = '0%';
         progBar.innerText = '0%';
 
@@ -540,7 +559,7 @@ class _HomeScreenState extends State<HomeScreen> {
           };
           xhr.onload = () => {
             if (xhr.status === 200) resolve();
-            else reject(new Error('Upload failed: ' + xhr.statusText));
+            else reject(new Error('Upload failed'));
           };
           xhr.onerror = () => reject(new Error('Network error'));
           xhr.send(file);
@@ -549,7 +568,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       progBar.style.width = '100%';
       progBar.innerText = '100%';
-      status.innerHTML = '<span style="color: #34D399; font-weight: bold;">Sent ' + files.length + ' file(s) successfully to receiver!</span>';
+      status.innerHTML = '<span style="color: #34A853; font-weight: 600;">Transferred ' + files.length + ' photo(s) directly to phone!</span>';
     }
   </script>
 </body>
