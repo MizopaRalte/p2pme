@@ -112,14 +112,91 @@
     });
   }
 
-  // File Selection via file input & camera roll input
+  // Screen Wake Lock & Keep-Alive for large iOS transfers
+  let screenWakeLock = null;
+  const wakeLockStatus = document.getElementById('wakeLockStatus');
+
+  async function acquireWakeLock() {
+    if ('wakeLock' in navigator) {
+      try {
+        screenWakeLock = await navigator.wakeLock.request('screen');
+        if (wakeLockStatus) wakeLockStatus.style.display = 'inline';
+        screenWakeLock.addEventListener('release', () => {
+          screenWakeLock = null;
+          if (wakeLockStatus) wakeLockStatus.style.display = 'none';
+        });
+      } catch (err) {
+        console.warn('Wake Lock error:', err);
+      }
+    }
+  }
+
+  function releaseWakeLock() {
+    if (screenWakeLock) {
+      screenWakeLock.release().catch(() => {});
+      screenWakeLock = null;
+    }
+    if (wakeLockStatus) wakeLockStatus.style.display = 'none';
+  }
+
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible' && currentSessionPin) {
+      await acquireWakeLock();
+    }
+  });
+
+  // Persistent Backup Ledger (Tracks what has already been backed up to prevent re-sending)
+  const BACKUP_LEDGER_KEY = 'p2pme_backed_up_files';
+  function getBackupLedger() {
+    try {
+      return JSON.parse(localStorage.getItem(BACKUP_LEDGER_KEY) || '{}');
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function markFilesBackedUp(files) {
+    const ledger = getBackupLedger();
+    files.forEach(f => {
+      const key = `${f.name}_${f.size}`;
+      ledger[key] = Date.now();
+    });
+    try {
+      localStorage.setItem(BACKUP_LEDGER_KEY, JSON.stringify(ledger));
+    } catch (_) {}
+  }
+
+  let skipAlreadyBackedUp = true;
+  window.toggleSkipBackedUp = function(checked) {
+    skipAlreadyBackedUp = checked;
+    renderSelectedFiles();
+  };
+
+  // File Selection via file input, camera roll input & folder picker
   const cameraInput = document.getElementById('cameraInput');
+  const folderInput = document.getElementById('folderInput');
+  const fileInput = document.getElementById('fileInput');
+
   if (cameraInput) {
     cameraInput.addEventListener('change', (e) => {
       const files = e.target.files ? Array.from(e.target.files) : [];
       if (files.length === 0) return;
       if (selectedList) {
         selectedList.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Processing selected photos...</div>';
+      }
+      setTimeout(() => {
+        selectedFiles = files;
+        renderSelectedFiles();
+      }, 50);
+    });
+  }
+
+  if (folderInput) {
+    folderInput.addEventListener('change', (e) => {
+      const files = e.target.files ? Array.from(e.target.files) : [];
+      if (files.length === 0) return;
+      if (selectedList) {
+        selectedList.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Scanning folder items...</div>';
       }
       setTimeout(() => {
         selectedFiles = files;
@@ -149,29 +226,58 @@
       if (btnStartSend) btnStartSend.disabled = true;
       return;
     }
-    if (btnStartSend) btnStartSend.disabled = false;
 
-    // High volume batch (e.g. > 6 photos): Show compact summary card instead of 500+ DOM chips
+    const ledger = getBackupLedger();
+    let alreadyBackedUpCount = 0;
+    const newFiles = [];
+    selectedFiles.forEach(f => {
+      const key = `${f.name}_${f.size}`;
+      if (ledger[key]) {
+        alreadyBackedUpCount++;
+      } else {
+        newFiles.push(f);
+      }
+    });
+
+    const effectiveFiles = (skipAlreadyBackedUp && alreadyBackedUpCount > 0) ? newFiles : selectedFiles;
+
+    if (btnStartSend) {
+      btnStartSend.disabled = (effectiveFiles.length === 0);
+    }
+
+    // High volume batch (e.g. > 6 photos or folder selection): Show compact summary card with deduplication status
     if (selectedFiles.length > 6) {
-      const totalMb = (selectedFiles.reduce((sum, f) => sum + (f.size || 0), 0) / (1024 * 1024)).toFixed(1);
+      const totalMb = (effectiveFiles.reduce((sum, f) => sum + (f.size || 0), 0) / (1024 * 1024)).toFixed(1);
       const summaryBox = document.createElement('div');
-      summaryBox.style.cssText = 'background: #303134; border: 1px solid var(--card-border); border-radius: 14px; padding: 12px 16px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;';
+      summaryBox.style.cssText = 'background: #303134; border: 1px solid var(--card-border); border-radius: 14px; padding: 14px 16px; margin-bottom: 12px;';
       summaryBox.innerHTML = `
-        <div>
-          <div style="font-weight: 600; font-size: 14px; color: #E8EAED;">📷 ${selectedFiles.length} photos selected</div>
-          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Total size: ~${totalMb} MB</div>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <div style="font-weight: 600; font-size: 14px; color: #E8EAED;">📷 ${selectedFiles.length} items in selection</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+              ${alreadyBackedUpCount > 0 ? `<span style="color:#34A853;">✓ ${alreadyBackedUpCount} already backed up</span> • ` : ''}
+              <strong>${effectiveFiles.length} to send</strong> (~${totalMb} MB)
+            </div>
+          </div>
+          <button type="button" onclick="clearSelectedFiles()" style="background: rgba(234,67,53,0.15); color: #EA4335; border: 1px solid rgba(234,67,53,0.3); border-radius: 16px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 500;">Clear all</button>
         </div>
-        <button type="button" onclick="clearSelectedFiles()" style="background: rgba(234,67,53,0.15); color: #EA4335; border: 1px solid rgba(234,67,53,0.3); border-radius: 16px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 500;">Clear all</button>
+        ${alreadyBackedUpCount > 0 ? `
+          <label style="display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; color: #E8EAED; cursor: pointer; user-select: none;">
+            <input type="checkbox" ${skipAlreadyBackedUp ? 'checked' : ''} onchange="toggleSkipBackedUp(this.checked)" style="accent-color: var(--google-blue); width: 15px; height: 15px;">
+            Skip already backed up photos (avoid duplicate transfers)
+          </label>
+        ` : ''}
       `;
       selectedList.appendChild(summaryBox);
       return;
     }
 
     selectedFiles.forEach((f, idx) => {
+      const isDone = ledger[`${f.name}_${f.size}`];
       const chip = document.createElement('div');
       chip.className = 'chip';
       chip.innerHTML = `
-        <span>📄 <strong>${escapeHtml(f.name)}</strong> (${(f.size / (1024 * 1024)).toFixed(1)} MB)</span>
+        <span>${isDone ? '✓ ' : '📄 '}<strong>${escapeHtml(f.name)}</strong> (${(f.size / (1024 * 1024)).toFixed(1)} MB)${isDone ? ' (Backed Up)' : ''}</span>
         <button type="button" onclick="removeFile(${idx})" title="Remove">&times;</button>
       `;
       selectedList.appendChild(chip);
@@ -181,6 +287,7 @@
   window.clearSelectedFiles = function() {
     selectedFiles = [];
     if (cameraInput) cameraInput.value = '';
+    if (folderInput) folderInput.value = '';
     if (fileInput) fileInput.value = '';
     renderSelectedFiles();
   };
@@ -207,12 +314,28 @@
   // Handle Send Drop
   window.handleCreateDrop = async function() {
     if (selectedFiles.length === 0) return;
+
+    const ledger = getBackupLedger();
+    let toSend = selectedFiles;
+    if (skipAlreadyBackedUp) {
+      const filtered = selectedFiles.filter(f => !ledger[`${f.name}_${f.size}`]);
+      if (filtered.length > 0) {
+        toSend = filtered;
+      }
+    }
+
+    if (toSend.length === 0) {
+      alert('All selected files have already been backed up.');
+      return;
+    }
+
     currentSessionPin = generatePin();
+    await acquireWakeLock();
 
     // Cache active files for direct in-browser delivery
     window._localActiveDrop = {
       pin: currentSessionPin,
-      files: [...selectedFiles]
+      files: [...toSend]
     };
 
     // Render PIN digits
@@ -227,11 +350,11 @@
     }
 
     if (sendActiveBox) sendActiveBox.classList.remove('hidden');
-    if (sendStatus) sendStatus.innerText = `Enter PIN ${currentSessionPin} on the other device`;
+    if (sendStatus) sendStatus.innerText = `Enter PIN ${currentSessionPin} on recipient device (${toSend.length} items ready)`;
     if (sendProgressCont) sendProgressCont.classList.remove('hidden');
     if (sendProgressBar) {
       sendProgressBar.style.width = '0%';
-      sendProgressBar.innerText = 'Waiting for connection...';
+      sendProgressBar.innerText = 'Screen kept awake • Waiting for recipient...';
     }
 
     // Render QR Code
@@ -250,7 +373,7 @@
     }
 
     // Broadcast presence on local Wi-Fi channel
-    broadcastLocalPresence(currentSessionPin, selectedFiles.length);
+    broadcastLocalPresence(currentSessionPin, toSend.length);
   };
 
   window.copyDropPin = function() {
@@ -318,26 +441,39 @@
       const files = window._localActiveDrop.files;
       if (files && files.length > 0) {
         if (recvProgressBar) {
-          recvProgressBar.style.width = '80%';
-          recvProgressBar.innerText = 'Delivering payload...';
+          recvProgressBar.style.width = '30%';
+          recvProgressBar.innerText = `Receiving 1 of ${files.length}...`;
         }
-        setTimeout(() => {
-          files.forEach(file => {
+        setTimeout(async () => {
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(file);
+            const blobUrl = URL.createObjectURL(file);
+            a.href = blobUrl;
             a.download = file.name;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-          });
+            URL.revokeObjectURL(blobUrl);
+            if (recvProgressBar) {
+              const pct = Math.round(((i + 1) / files.length) * 100);
+              recvProgressBar.style.width = `${pct}%`;
+              recvProgressBar.innerText = `${i + 1}/${files.length} (${pct}%)`;
+            }
+            if (files.length > 1) {
+              await new Promise(r => setTimeout(r, 100));
+            }
+          }
+          markFilesBackedUp(files);
+          releaseWakeLock();
           if (recvProgressBar) {
             recvProgressBar.style.width = '100%';
             recvProgressBar.innerText = '100%';
           }
           if (recvStatus) {
-            recvStatus.innerHTML = `<span style="color:#34A853;font-weight:500;">Downloaded ${files[0].name}</span>`;
+            recvStatus.innerHTML = `<span style="color:#34A853;font-weight:500;">✓ Successfully saved ${files.length} file(s)</span>`;
           }
-        }, 600);
+        }, 300);
         return;
       }
     }
