@@ -67,7 +67,32 @@
       tabAppsMobile?.classList.add('active');
       viewApps?.classList.remove('hidden');
     }
+
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (_) {}
   };
+
+  // Instant touch / pointer bindings for mobile navigation reliability
+  function bindNavTarget(el, tab) {
+    if (!el) return;
+    let lastHandled = 0;
+    const activate = (e) => {
+      const now = Date.now();
+      if (now - lastHandled < 250) return;
+      lastHandled = now;
+      window.switchTab(tab);
+    };
+    el.addEventListener('pointerdown', activate, { passive: true });
+    el.addEventListener('click', activate);
+  }
+
+  bindNavTarget(tabDropHeader, 'drop');
+  bindNavTarget(tabNearbyHeader, 'nearby');
+  bindNavTarget(tabAppsHeader, 'apps');
+  bindNavTarget(tabDropMobile, 'drop');
+  bindNavTarget(tabNearbyMobile, 'nearby');
+  bindNavTarget(tabAppsMobile, 'apps');
 
   // Drop Mode Switching (Send vs Receive)
   window.setDropMode = function(mode) {
