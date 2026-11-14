@@ -1,5 +1,5 @@
 // P2Pme Service Worker - 100% Offline PWA Support
-const CACHE_NAME = 'p2pme-v6';
+const CACHE_NAME = 'p2pme-v7';
 const ASSETS = [
   './',
   './index.html',

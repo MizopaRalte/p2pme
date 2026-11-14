@@ -208,7 +208,6 @@
   // File Selection via file input, camera roll input & folder picker
   const cameraInput = document.getElementById('cameraInput');
   const folderInput = document.getElementById('folderInput');
-  const fileInput = document.getElementById('fileInput');
 
   if (cameraInput) {
     cameraInput.addEventListener('change', (e) => {
