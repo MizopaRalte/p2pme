@@ -500,27 +500,61 @@
       bottom: 0;
       left: 0;
       right: 0;
-      background: rgba(11, 15, 25, 0.95);
-      backdrop-filter: blur(16px);
+      background: rgba(32, 33, 36, 0.98);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border-top: 1px solid var(--card-border);
       justify-content: space-around;
-      padding: 10px 0;
-      z-index: 50;
+      align-items: center;
+      padding-top: 8px;
+      padding-bottom: calc(18px + env(safe-area-inset-bottom, 28px));
+      z-index: 100;
+      box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4);
     }
     .mobile-nav-btn {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 3px;
+      justify-content: center;
+      gap: 4px;
       background: transparent;
       border: none;
       color: var(--text-muted);
-      font-size: 11px;
-      font-weight: 600;
+      font-size: 12px;
+      font-weight: 500;
       cursor: pointer;
+      flex: 1;
+      max-width: 120px;
+      padding: 6px 4px;
+      border-radius: 16px;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      user-select: none;
+      transition: color 0.15s ease;
     }
-    .mobile-nav-btn.active { color: var(--accent); }
-    .mobile-nav-icon { font-size: 20px; }
+    .mobile-nav-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 60px;
+      height: 32px;
+      border-radius: 16px;
+      transition: background 0.2s ease, transform 0.12s ease;
+    }
+    .mobile-nav-btn.active .mobile-nav-pill {
+      background: rgba(26, 115, 232, 0.24);
+    }
+    .mobile-nav-btn.active {
+      color: #8AB4F8;
+      font-weight: 700;
+    }
+    .mobile-nav-btn:active .mobile-nav-pill {
+      transform: scale(0.92);
+    }
+    .mobile-nav-icon {
+      font-size: 21px;
+      line-height: 1;
+    }
 
     @media (max-width: 768px) {
       header { padding: 12px 14px; }
@@ -528,7 +562,7 @@
       .status-badge { font-size: 10px; padding: 4px 8px; }
       .header-nav { display: none; }
       .mobile-bottom-nav { display: flex; }
-      main { padding: 18px 12px 90px 12px; }
+      main { padding: 18px 12px calc(115px + env(safe-area-inset-bottom, 34px)) 12px; }
       .hero { margin-bottom: 18px; }
       .hero h2 { font-size: 22px; }
       .hero p { font-size: 13px; }
@@ -795,15 +829,15 @@
   <!-- Mobile Bottom Navigation Bar (Screens <= 768px) -->
   <nav class="mobile-bottom-nav">
     <button class="mobile-nav-btn active" id="tabDropMobile" onclick="switchTab('drop')">
-      <span class="mobile-nav-icon">📸</span>
+      <div class="mobile-nav-pill"><span class="mobile-nav-icon">📸</span></div>
       <span>Photos</span>
     </button>
     <button class="mobile-nav-btn" id="tabNearbyMobile" onclick="switchTab('nearby')">
-      <span class="mobile-nav-icon">📡</span>
+      <div class="mobile-nav-pill"><span class="mobile-nav-icon">📡</span></div>
       <span>Nearby</span>
     </button>
     <button class="mobile-nav-btn" id="tabAppsMobile" onclick="switchTab('apps')">
-      <span class="mobile-nav-icon">📱</span>
+      <div class="mobile-nav-pill"><span class="mobile-nav-icon">📱</span></div>
       <span>Apps</span>
     </button>
   </nav>
