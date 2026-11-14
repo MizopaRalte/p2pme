@@ -81,18 +81,13 @@
     } catch (_) {}
   };
 
-  // Instant touch / pointer bindings for mobile navigation reliability
+  // Reliable navigation bindings without system gesture conflicts
   function bindNavTarget(el, tab) {
     if (!el) return;
-    let lastHandled = 0;
-    const activate = (e) => {
-      const now = Date.now();
-      if (now - lastHandled < 250) return;
-      lastHandled = now;
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
       window.switchTab(tab);
-    };
-    el.addEventListener('pointerdown', activate, { passive: true });
-    el.addEventListener('click', activate);
+    });
   }
 
   bindNavTarget(tabDropHeader, 'drop');

@@ -210,8 +210,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  static const int currentVersionCode = 3;
-  static const String currentVersionName = '1.0.2';
+  int _currentVersionCode = 4;
+  String _currentVersionName = '1.0.3';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -221,10 +221,31 @@ class _HomeScreenState extends State<HomeScreen> {
   double _downloadProgress = 0.0;
   String? _downloadStatusText;
 
+  Future<void> _initAppVersion() async {
+    if (Platform.isAndroid) {
+      try {
+        final ver = await _bgChannel.invokeMapMethod<String, dynamic>('getAppVersion');
+        if (ver != null) {
+          final code = (ver['versionCode'] ?? 4) as int;
+          final name = ver['versionName']?.toString() ?? '1.0.3';
+          if (mounted) {
+            setState(() {
+              _currentVersionCode = code;
+              _currentVersionName = name;
+            });
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
   Future<void> _checkForAppUpdates({bool manual = false, VoidCallback? onComplete}) async {
     if (_isCheckingUpdates) return;
     setState(() => _isCheckingUpdates = true);
     try {
+      if (Platform.isAndroid) {
+        await _initAppVersion();
+      }
       final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
       final req = await client.getUrl(Uri.parse('https://p2pme.pages.dev/version.json'));
       final resp = await req.close();
@@ -243,13 +264,13 @@ class _HomeScreenState extends State<HomeScreen> {
             _latestVersionName = remoteName;
             _updateReleaseNotes = notes;
             _updateDownloadUrl = targetUrl;
-            _updateAvailable = (remoteCode > currentVersionCode);
+            _updateAvailable = (remoteCode > _currentVersionCode);
           });
           onComplete?.call();
           if (manual && !_updateAvailable) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('✓ P2Pme is up to date (v1.0.2)'),
+              SnackBar(
+                content: Text('✓ P2Pme is up to date (v$_currentVersionName)'),
                 backgroundColor: GooglePhotosColors.green,
               ),
             );
@@ -3850,7 +3871,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   _diagRow('Encryption', 'TLS 1.3 End-to-End'),
                   _diagRow('Integrity Check', 'BLAKE3 Cryptographic Chunking'),
                   _diagRow('Zero-Custody', 'Direct Peer-to-Peer (No Cloud Servers)'),
-                  _diagRow('App Version', 'v$currentVersionName (build $currentVersionCode)'),
+                  _diagRow('App Version', 'v$_currentVersionName (build $_currentVersionCode)'),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
