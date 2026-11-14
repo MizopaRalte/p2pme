@@ -69,25 +69,49 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
                 }
+                "canRequestPackageInstalls" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        result.success(packageManager.canRequestPackageInstalls())
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "openInstallPermissionSettings" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        try {
+                            val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                data = Uri.parse("package:$packageName")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("ERROR", e.message, null)
+                        }
+                    } else {
+                        result.success(true)
+                    }
+                }
                 "installApk" -> {
                     val filePath = call.argument<String>("filePath")
                     if (filePath != null) {
                         val file = File(filePath)
                         if (file.exists()) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                                val manageIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                    data = Uri.parse("package:$packageName")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(manageIntent)
+                                result.success(false)
+                                return@setMethodCallHandler
+                            }
+
                             try {
                                 val apkUri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                                     FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
                                 } else {
                                     Uri.fromFile(file)
-                                }
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                    if (!packageManager.canRequestPackageInstalls()) {
-                                        val manageIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                                            data = Uri.parse("package:$packageName")
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        startActivity(manageIntent)
-                                    }
                                 }
                                 val intent = Intent(Intent.ACTION_VIEW).apply {
                                     setDataAndType(apkUri, "application/vnd.android.package-archive")
@@ -105,10 +129,6 @@ class MainActivity : FlutterActivity() {
                     } else {
                         result.error("INVALID_PATH", "filePath is required", null)
                     }
-                }
-                "getDownloadDir" -> {
-                    val dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: cacheDir
-                    result.success(dir.absolutePath)
                 }
                 "openBrowserUrl" -> {
                     val url = call.argument<String>("url")

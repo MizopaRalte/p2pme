@@ -210,8 +210,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  static const int currentVersionCode = 4;
-  static const String currentVersionName = '1.0.3';
+  static const int currentVersionCode = 3;
+  static const String currentVersionName = '1.0.2';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -249,7 +249,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (manual && !_updateAvailable) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('✓ P2Pme is up to date (v$currentVersionName)'),
+                content: Text('✓ P2Pme is up to date (v1.0.2)'),
                 backgroundColor: GooglePhotosColors.green,
               ),
             );
@@ -282,6 +282,45 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final url = _updateDownloadUrl!;
       if (Platform.isAndroid) {
+        bool canInstall = true;
+        try {
+          canInstall = await _bgChannel.invokeMethod<bool>('canRequestPackageInstalls') ?? true;
+        } catch (_) {}
+
+        if (!canInstall && mounted) {
+          final allow = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.security_rounded, color: GooglePhotosColors.blue),
+                  SizedBox(width: 8),
+                  Text('Install Permission', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: const Text(
+                'To complete the update, Android requires permission to install apps from P2Pme.\n\nTap "Open Settings" and enable "Allow from this source".',
+                style: TextStyle(fontSize: 13),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Open Settings'),
+                ),
+              ],
+            ),
+          );
+
+          if (allow == true) {
+            await _bgChannel.invokeMethod('openInstallPermissionSettings');
+          }
+          return;
+        }
+
         String downloadDirPath = '/storage/emulated/0/Download';
         try {
           final res = await _bgChannel.invokeMethod<String>('getDownloadDir');
@@ -333,7 +372,15 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         // Trigger native Android package installer
-        await _bgChannel.invokeMethod('installApk', {'filePath': targetFile.path});
+        final success = await _bgChannel.invokeMethod<bool>('installApk', {'filePath': targetFile.path}) ?? true;
+        if (!success && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please enable "Allow from this source" in Settings, then tap Install.'),
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
       } else {
         await _openDownloadUrl(url);
       }
@@ -3816,12 +3863,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     label: const Text('Check for Updates', style: TextStyle(fontSize: 12)),
                     onPressed: _isCheckingUpdates
                         ? null
-                        : () {
-                            setModalState(() {});
-                            _checkForAppUpdates(manual: true, onComplete: () {
+                        : () => _checkForAppUpdates(manual: true, onComplete: () {
                               if (context.mounted) setModalState(() {});
-                            });
-                          },
+                            }),
                   ),
                   if (_updateAvailable) ...[
                     const SizedBox(height: 12),
