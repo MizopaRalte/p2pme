@@ -1,11 +1,11 @@
 {
-  "version": "1.0.1",
-  "version_code": 2,
+  "version": "1.0.2",
+  "version_code": 3,
   "release_date": "2026-11-14",
-  "release_notes": "Nearby Wi-Fi 1-tap pairing, Windows portable desktop app, and performance improvements.",
+  "release_notes": "24/7 Home Android Server Hub, persistent Known Devices sync, and elevated mobile navigation.",
   "apk_url": "https://p2pme.pages.dev/downloads/P2Pme.apk",
-  "apk_sha256": "3E6BC0100160B20DA359FB6FEC3BFB5BCE4FDA2A752F211932FF661A3C56EA10",
+  "apk_sha256": "23F5D915A20C66E33C433455A3013132C9EEC5603423D10885F25EEE26708AF3",
   "windows_url": "https://p2pme.pages.dev/downloads/P2Pme-Windows.zip",
-  "windows_sha256": "D372D400E258E860D6EFE3740915E386EE94CD9CE4A9D894007F2ED99ADA638F",
+  "windows_sha256": "FDBA3CA16515EC400B320317000229DA94DE08623798F1E9665F097625DB85B0",
   "min_supported_version": 1
 }

@@ -210,8 +210,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  static const int currentVersionCode = 2;
-  static const String currentVersionName = '1.0.1';
+  static const int currentVersionCode = 3;
+  static const String currentVersionName = '1.0.2';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -245,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (manual && !_updateAvailable) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('✓ P2Pme is up to date (v1.0.1)'),
+                content: Text('✓ P2Pme is up to date (v1.0.2)'),
                 backgroundColor: GooglePhotosColors.green,
               ),
             );
