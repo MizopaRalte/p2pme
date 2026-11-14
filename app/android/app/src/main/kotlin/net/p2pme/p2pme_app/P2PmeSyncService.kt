@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -24,6 +25,7 @@ class P2PmeSyncService : Service() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -47,8 +49,8 @@ class P2PmeSyncService : Service() {
         )
 
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("P2Pme Auto-Sync Active")
-            .setContentText("Continuous background replication & Quick Drop listening")
+            .setContentTitle("P2Pme 24/7 Home Hub Active")
+            .setContentText("Listening for incoming photo transfers & sync")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -64,10 +66,19 @@ class P2PmeSyncService : Service() {
         try {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "P2Pme::SyncWakeLock").apply {
-                acquire(10 * 60 * 1000L /*10 minutes*/)
+                acquire()
             }
         } catch (e: Exception) {
             // Ignore if wake lock cannot be acquired
+        }
+
+        try {
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            wifiLock = wifiManager?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "P2Pme::WifiLock")?.apply {
+                acquire()
+            }
+        } catch (e: Exception) {
+            // Ignore if wifi lock cannot be acquired
         }
 
         return START_STICKY
@@ -83,6 +94,16 @@ class P2PmeSyncService : Service() {
             // Ignore
         }
         wakeLock = null
+
+        try {
+            wifiLock?.let {
+                if (it.isHeld) it.release()
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        wifiLock = null
+
         super.onDestroy()
     }
 

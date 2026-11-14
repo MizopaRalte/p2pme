@@ -556,6 +556,7 @@ class _HomeScreenState extends State<HomeScreen> {
     request.response.headers.set('Access-Control-Allow-Origin', '*');
     request.response.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     request.response.headers.set('Access-Control-Allow-Headers', '*');
+    request.response.headers.set('Access-Control-Allow-Private-Network', 'true');
 
     if (request.method == 'OPTIONS') {
       request.response.statusCode = HttpStatus.ok;

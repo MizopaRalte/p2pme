@@ -277,6 +277,22 @@
       btnStartSend.disabled = (effectiveFiles.length === 0);
     }
 
+    // Update 1-Tap Home Hub Quick Send Card
+    if (homeHubQuickCard) {
+      const hubs = getSavedHubs();
+      if (hubs.length > 0 && effectiveFiles.length > 0) {
+        const hub = hubs[0];
+        if (homeHubCardName) homeHubCardName.innerText = hub.name;
+        if (homeHubCardAddr) homeHubCardAddr.innerText = `${hub.host}:${hub.port}`;
+        if (btnSendToHub) {
+          btnSendToHub.innerHTML = `<span>🚀</span> Send ${effectiveFiles.length} item(s) to ${escapeHtml(hub.name)} (No PIN)`;
+        }
+        homeHubQuickCard.style.display = 'block';
+      } else {
+        homeHubQuickCard.style.display = 'none';
+      }
+    }
+
     // High volume batch (e.g. > 6 photos or folder selection): Show compact summary card with deduplication status
     if (selectedFiles.length > 6) {
       const totalMb = (effectiveFiles.reduce((sum, f) => sum + (f.size || 0), 0) / (1024 * 1024)).toFixed(1);
@@ -628,6 +644,267 @@
     window.handleDownloadDrop();
   };
 
+  // ==========================================
+  // Known 24/7 Home Hubs (Trusted Devices)
+  // ==========================================
+  const knownHubsList = document.getElementById('knownHubsList');
+  const homeHubQuickCard = document.getElementById('homeHubQuickCard');
+  const homeHubCardName = document.getElementById('homeHubCardName');
+  const homeHubCardAddr = document.getElementById('homeHubCardAddr');
+  const btnSendToHub = document.getElementById('btnSendToHub');
+  const hubModal = document.getElementById('hubModal');
+  const modalHubName = document.getElementById('modalHubName');
+  const modalHubHost = document.getElementById('modalHubHost');
+  const modalHubPort = document.getElementById('modalHubPort');
+
+  function getSavedHubs() {
+    try {
+      const data = localStorage.getItem('p2pme_saved_hubs');
+      if (data) return JSON.parse(data);
+    } catch (_) {}
+
+    // Default initialization
+    const fallbackHost = localStorage.getItem('p2pme_saved_phone_ip') || '192.168.178.35';
+    const defaultHubs = [
+      {
+        id: 'hub_home_default',
+        name: 'Home Android Hub',
+        host: fallbackHost,
+        port: 45455,
+        addedAt: Date.now()
+      }
+    ];
+    try {
+      localStorage.setItem('p2pme_saved_hubs', JSON.stringify(defaultHubs));
+    } catch (_) {}
+    return defaultHubs;
+  }
+
+  function saveHubsList(hubs) {
+    try {
+      localStorage.setItem('p2pme_saved_hubs', JSON.stringify(hubs));
+    } catch (_) {}
+    renderSavedHubs();
+  }
+
+  function renderSavedHubs() {
+    const hubs = getSavedHubs();
+
+    // 1. Render in Quick Drop Send Panel
+    if (homeHubQuickCard) {
+      if (hubs.length > 0) {
+        const primaryHub = hubs[0];
+        if (homeHubCardName) homeHubCardName.innerText = primaryHub.name;
+        if (homeHubCardAddr) homeHubCardAddr.innerText = `${primaryHub.host}:${primaryHub.port}`;
+        if (selectedFiles && selectedFiles.length > 0) {
+          homeHubQuickCard.style.display = 'block';
+          if (btnSendToHub) {
+            btnSendToHub.innerHTML = `<span>🚀</span> Send ${selectedFiles.length} item(s) to ${escapeHtml(primaryHub.name)} (No PIN)`;
+          }
+        } else {
+          homeHubQuickCard.style.display = 'none';
+        }
+      } else {
+        homeHubQuickCard.style.display = 'none';
+      }
+    }
+
+    // 2. Render in Nearby Tab
+    if (!knownHubsList) return;
+    knownHubsList.innerHTML = '';
+
+    if (hubs.length === 0) {
+      knownHubsList.innerHTML = `
+        <div style="background: rgba(255,255,255,0.03); border: 1px dashed var(--card-border); border-radius: 14px; padding: 18px; text-align: center; color: var(--text-muted); font-size: 13px;">
+          No 24/7 Home Hubs saved yet. Tap <strong>+ Add Hub</strong> above to save your Android phone as a permanent receiver.
+        </div>
+      `;
+      return;
+    }
+
+    hubs.forEach(hub => {
+      const card = document.createElement('div');
+      card.className = 'peer-card';
+      card.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid var(--card-border);border-radius:16px;margin-bottom:10px;flex-wrap:wrap;';
+      card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:42px;height:42px;border-radius:21px;background:rgba(26,115,232,0.18);display:flex;align-items:center;justify-content:center;font-size:22px;">
+            🏠
+          </div>
+          <div style="text-align:left;">
+            <div style="font-weight:700;font-size:14px;color:var(--text);display:flex;align-items:center;gap:6px;">
+              ${escapeHtml(hub.name)}
+              <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:rgba(52,168,83,0.15);color:#34A853;border:1px solid rgba(52,168,83,0.3);font-weight:600;">24/7 SERVER</span>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);font-family:monospace;margin-top:2px;">
+              ${escapeHtml(hub.host)}:${hub.port}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="header-nav-btn" style="background:var(--google-blue);color:white;padding:7px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;" onclick="quickSendToHub('${hub.id}')">
+            Send Photos &rarr;
+          </button>
+          <button class="header-nav-btn" style="background:transparent;border:1px solid rgba(234,67,53,0.3);color:#EA4335;padding:7px 12px;border-radius:20px;font-size:12px;cursor:pointer;" onclick="removeHub('${hub.id}')" title="Forget Device">
+            ✕
+          </button>
+        </div>
+      `;
+      knownHubsList.appendChild(card);
+    });
+  }
+
+  window.showAddHubModal = function() {
+    if (hubModal) hubModal.classList.remove('hidden');
+  };
+
+  window.hideAddHubModal = function() {
+    if (hubModal) hubModal.classList.add('hidden');
+  };
+
+  window.saveHubFromModal = function() {
+    const name = modalHubName ? modalHubName.value.trim() : 'Home Android Hub';
+    const host = modalHubHost ? modalHubHost.value.trim() : '192.168.178.35';
+    const port = modalHubPort ? parseInt(modalHubPort.value.trim()) || 45455 : 45455;
+
+    if (!host) {
+      alert('Please enter a valid IP address or domain');
+      return;
+    }
+
+    const hubs = getSavedHubs();
+    const newHub = {
+      id: `hub_${Date.now()}`,
+      name: name || 'Home Android Hub',
+      host: host,
+      port: port,
+      addedAt: Date.now()
+    };
+    hubs.unshift(newHub);
+    saveHubsList(hubs);
+
+    try {
+      localStorage.setItem('p2pme_saved_phone_ip', host);
+    } catch (_) {}
+
+    hideAddHubModal();
+  };
+
+  window.removeHub = function(id) {
+    if (!confirm('Forget this saved 24/7 Home Hub?')) return;
+    const hubs = getSavedHubs().filter(h => h.id !== id);
+    saveHubsList(hubs);
+  };
+
+  window.quickSendToHub = function(hubId) {
+    const hubs = getSavedHubs();
+    const hub = hubs.find(h => h.id === hubId) || hubs[0];
+    if (!hub) return;
+
+    window.switchTab('drop');
+    window.setDropMode('send');
+
+    if (selectedFiles.length === 0) {
+      if (cameraInput) cameraInput.click();
+    } else {
+      window.sendSelectedToHub(hubId);
+    }
+  };
+
+  window.sendSelectedToHub = async function(hubId) {
+    if (!selectedFiles || selectedFiles.length === 0) {
+      if (cameraInput) cameraInput.click();
+      return;
+    }
+
+    const hubs = getSavedHubs();
+    const hub = (hubId ? hubs.find(h => h.id === hubId) : null) || hubs[0];
+    if (!hub) {
+      alert('No 24/7 Home Hub configured. Please add one under Nearby & Saved Hubs.');
+      return;
+    }
+
+    await acquireWakeLock();
+
+    if (sendProgressCont) sendProgressCont.classList.remove('hidden');
+    if (sendStatus) {
+      sendStatus.innerHTML = `<span style="color:#8AB4F8;">Connecting to ${escapeHtml(hub.name)} (${hub.host}:${hub.port})...</span>`;
+    }
+
+    let successCount = 0;
+    const totalFiles = selectedFiles.length;
+    const uploadUrlBase = `http://${hub.host}:${hub.port}/upload`;
+
+    for (let i = 0; i < totalFiles; i++) {
+      const file = selectedFiles[i];
+      const pct = Math.round(((i) / totalFiles) * 100);
+      if (sendProgressBar) {
+        sendProgressBar.style.width = `${Math.max(5, pct)}%`;
+        sendProgressBar.innerText = `Sending ${i + 1}/${totalFiles}: ${file.name} (${pct}%)`;
+      }
+
+      try {
+        const uploadUrl = `${uploadUrlBase}?name=${encodeURIComponent(file.name)}`;
+        const res = await fetch(uploadUrl, {
+          method: 'POST',
+          body: file,
+          mode: 'cors',
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream'
+          }
+        });
+
+        if (res.ok) {
+          successCount++;
+        } else {
+          throw new Error(`Server returned status ${res.status}`);
+        }
+      } catch (err) {
+        console.warn(`Direct fetch to ${uploadUrlBase} failed, offering direct portal link:`, err);
+        if (sendProgressBar) {
+          sendProgressBar.style.width = '100%';
+          sendProgressBar.innerText = 'Direct LAN Portal Available';
+        }
+        if (sendStatus) {
+          sendStatus.innerHTML = `
+            <div style="background:rgba(26,115,232,0.12);border:1px solid rgba(26,115,232,0.3);border-radius:14px;padding:14px;text-align:left;margin-top:10px;">
+              <div style="font-weight:600;color:#8AB4F8;margin-bottom:6px;">🚀 Direct Local Transfer:</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+                Browser HTTPS security policy: To stream files directly over Wi-Fi without cloud servers, tap to open the local portal on your phone:
+              </div>
+              <a href="http://${hub.host}:${hub.port}/" target="_blank" style="display:inline-block;background:var(--google-blue);color:white;padding:8px 18px;border-radius:20px;text-decoration:none;font-size:13px;font-weight:600;">
+                Open ${escapeHtml(hub.name)} Direct Portal &rarr;
+              </a>
+            </div>
+          `;
+        }
+        releaseWakeLock();
+        return;
+      }
+    }
+
+    if (sendProgressBar) {
+      sendProgressBar.style.width = '100%';
+      sendProgressBar.innerText = '100% Complete';
+    }
+
+    if (sendStatus) {
+      sendStatus.innerHTML = `
+        <span style="color:#34A853;font-weight:700;font-size:14px;">
+          ✓ Successfully delivered ${successCount} photo(s) to ${escapeHtml(hub.name)}!
+        </span><br>
+        <span style="font-size:12px;color:var(--text-muted);">
+          Saved directly into Android gallery without cloud storage custody.
+        </span>
+      `;
+    }
+
+    markFilesBackedUp(selectedFiles);
+    releaseWakeLock();
+    selectedFiles = [];
+    renderSelectedFiles();
+  };
+
   // URL Hash auto-fill & deep-linking
   function handleHashRoute() {
     try {
@@ -637,6 +914,8 @@
         phoneIpInput.value = savedPhoneIp;
       }
     } catch (_) {}
+
+    renderSavedHubs();
 
     const hash = window.location.hash;
     if (hash.includes('tab=nearby')) {
