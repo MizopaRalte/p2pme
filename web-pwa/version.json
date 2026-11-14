@@ -2,9 +2,9 @@
   "version": "1.0.3",
   "version_code": 4,
   "release_date": "2026-11-14",
-  "release_notes": "Direct in-app download and installation of updates, 24/7 Home Android Server Hub, persistent Known Devices sync, and elevated mobile navigation.",
+  "release_notes": "Automatic background and resume update checks, 1-tap in-app installer, 24/7 Home Android Server Hub, and elevated mobile navigation.",
   "apk_url": "https://p2pme.pages.dev/downloads/P2Pme.apk",
-  "apk_sha256": "558691ABE6FD6A7F86E9966F6D66E0087B768B5DE69CBCD031C8C2ACC93FB3CC",
+  "apk_sha256": "ABFCBFB5089AD235806C72EF54E86B6FBE400BB3C17B08CB42D3F6562C37D54A",
   "windows_url": "https://p2pme.pages.dev/downloads/P2Pme-Windows.zip",
   "windows_sha256": "0A659D054130C2E0559C76580CB1200C5AAACB6E4304F47B8B75B757C89C17DD",
   "min_supported_version": 1

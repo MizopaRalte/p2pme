@@ -937,10 +937,68 @@
   }
   window.addEventListener('hashchange', handleHashRoute);
 
-  // PWA Service Worker Registration
+  // PWA Service Worker Registration & Background Auto-Update
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW error:', err));
+      navigator.serviceWorker.register('./sw.js').then((reg) => {
+        // Silently check for PWA updates when returning to tab
+        window.addEventListener('focus', () => {
+          reg.update().catch(() => {});
+        });
+        // Silently check every 30 minutes in the background
+        setInterval(() => {
+          reg.update().catch(() => {});
+        }, 30 * 60 * 1000);
+      }).catch((err) => console.log('SW error:', err));
+
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!refreshing) {
+          refreshing = true;
+          showWebUpdateToast();
+        }
+      });
     });
+  }
+
+  function showWebUpdateToast() {
+    if (document.getElementById('webUpdateToast')) return;
+    const toast = document.createElement('div');
+    toast.id = 'webUpdateToast';
+    toast.style.cssText = `
+      position: fixed;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(36, 38, 46, 0.96);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 28px;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      z-index: 9999;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+      font-size: 13px;
+      color: #E8EAED;
+      font-weight: 600;
+      animation: fadeInToast 0.3s ease;
+    `;
+    toast.innerHTML = `
+      <span>⚡ New version available</span>
+      <button onclick="window.location.reload()" style="
+        background: #1A73E8;
+        color: white;
+        border: none;
+        border-radius: 14px;
+        padding: 5px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      ">Refresh</button>
+    `;
+    document.body.appendChild(toast);
   }
 })();

@@ -130,7 +130,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   String? _nodeId;
   int _listeningPort = 0;
@@ -220,6 +220,27 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isDownloadingUpdate = false;
   double _downloadProgress = 0.0;
   String? _downloadStatusText;
+  DateTime? _lastUpdateCheckTime;
+  Timer? _periodicUpdateTimer;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final now = DateTime.now();
+      // Silently check if resuming after 30+ minutes
+      if (_lastUpdateCheckTime == null || now.difference(_lastUpdateCheckTime!).inMinutes >= 30) {
+        _checkForAppUpdates();
+      }
+    }
+  }
+
+  void _startPeriodicUpdateChecks() {
+    _periodicUpdateTimer?.cancel();
+    // Silently check every 4 hours while app stays running / serving 24/7
+    _periodicUpdateTimer = Timer.periodic(const Duration(hours: 4), (_) {
+      if (mounted) _checkForAppUpdates();
+    });
+  }
 
   Future<void> _initAppVersion() async {
     if (Platform.isAndroid) {
@@ -242,6 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _checkForAppUpdates({bool manual = false, VoidCallback? onComplete}) async {
     if (_isCheckingUpdates) return;
     setState(() => _isCheckingUpdates = true);
+    _lastUpdateCheckTime = DateTime.now();
     try {
       if (Platform.isAndroid) {
         await _initAppVersion();
@@ -260,18 +282,40 @@ class _HomeScreenState extends State<HomeScreen> {
             : (json['apk_url']?.toString() ?? 'https://p2pme.pages.dev/downloads/P2Pme.apk');
 
         if (mounted) {
+          final wasAvailable = _updateAvailable;
+          final isNowAvailable = (remoteCode > _currentVersionCode);
           setState(() {
             _latestVersionName = remoteName;
             _updateReleaseNotes = notes;
             _updateDownloadUrl = targetUrl;
-            _updateAvailable = (remoteCode > _currentVersionCode);
+            _updateAvailable = isNowAvailable;
           });
           onComplete?.call();
-          if (manual && !_updateAvailable) {
+          if (manual && !isNowAvailable) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('✓ P2Pme is up to date (v$_currentVersionName)'),
                 backgroundColor: GooglePhotosColors.green,
+              ),
+            );
+          } else if (!manual && isNowAvailable && !wasAvailable) {
+            // Unobtrusive discovery notification when a new update is first found in background
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.system_update_rounded, color: Colors.white, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text('⚡ P2Pme v$remoteName update is available!')),
+                  ],
+                ),
+                action: SnackBarAction(
+                  label: 'Update Now',
+                  textColor: Colors.amberAccent,
+                  onPressed: () => _downloadAndInstallUpdate(),
+                ),
+                duration: const Duration(seconds: 10),
+                behavior: SnackBarBehavior.floating,
               ),
             );
           }
@@ -440,6 +484,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _webDropSessionToken = _generateSessionToken();
     if (Platform.isAndroid) {
       final sampleImg = File('/sdcard/Pictures/Screenshots/Screenshot_20260622-194857.jpg');
@@ -452,10 +497,13 @@ class _HomeScreenState extends State<HomeScreen> {
     _startWebDropServer();
     _startNearbyBeacon();
     _checkForAppUpdates();
+    _startPeriodicUpdateChecks();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _periodicUpdateTimer?.cancel();
     _beaconSocket?.close();
     _beaconTimer?.cancel();
     _nearbyScanTimer?.cancel();
