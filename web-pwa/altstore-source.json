@@ -1,0 +1,40 @@
+{
+  "name": "P2Pme Official Source",
+  "identifier": "net.p2pme.source",
+  "sourceURL": "https://p2pme.pages.dev/altstore-source.json",
+  "apps": [
+    {
+      "name": "P2Pme",
+      "bundleIdentifier": "net.p2pme.p2pmeApp",
+      "developerName": "P2Pme Project",
+      "subtitle": "Direct private photo backup & Wi-Fi sync",
+      "localizedDescription": "P2Pme gives you complete ownership of your photos. Sync and back up camera roll photos directly to your Android server or PC with zero cloud intermediaries.\n\n• Continuous automated photo backup\n• End-to-end encrypted direct Wi-Fi and WebRTC transfer\n• Zero cloud storage, 100% private",
+      "iconURL": "https://p2pme.pages.dev/icon-512.png",
+      "tintColor": "1A73E8",
+      "category": "utilities",
+      "permissions": [
+        {
+          "type": "photos",
+          "usageDescription": "Allows automatic camera roll backup directly to your private home storage."
+        },
+        {
+          "type": "local-network",
+          "usageDescription": "Discovers nearby P2Pme receivers and 24/7 home servers on your Wi-Fi network."
+        }
+      ],
+      "beta": false,
+      "versions": [
+        {
+          "version": "1.0.4",
+          "buildVersion": "5",
+          "date": "2026-11-14",
+          "localizedDescription": "Native iOS background sync engine, WebRTC NAT hole punching, and 24/7 Home Hub support.",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme.ipa",
+          "size": 24000000,
+          "minOSVersion": "14.0"
+        }
+      ]
+    }
+  ],
+  "news": []
+}

@@ -7,5 +7,7 @@
   "apk_sha256": "33F08F9ED0D4D04D5D941696A3BD0097C399211D1AFF3CAD96DE3C4C6C9E84F9",
   "windows_url": "https://p2pme.pages.dev/downloads/P2Pme-Windows.zip",
   "windows_sha256": "0A659D054130C2E0559C76580CB1200C5AAACB6E4304F47B8B75B757C89C17DD",
+  "ipa_url": "https://p2pme.pages.dev/downloads/P2Pme.ipa",
+  "altstore_source_url": "https://p2pme.pages.dev/altstore-source.json",
   "min_supported_version": 1
 }

@@ -1,0 +1,124 @@
+name: Build & Release P2Pme
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ios:
+    name: Build iOS IPA (macOS)
+    runs-on: macos-14
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Flutter Dependencies
+        run: |
+          cd app
+          flutter pub get
+
+      - name: Build iOS Release (Unsigned for Sideloading)
+        run: |
+          cd app
+          flutter build ios --release --no-codesign
+
+      - name: Package Payload into P2Pme.ipa
+        run: |
+          cd app/build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -r -q P2Pme.ipa Payload
+          mv P2Pme.ipa ../../../../P2Pme.ipa
+
+      - name: Upload iOS IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2pme-ios-ipa
+          path: P2Pme.ipa
+          if-no-files-found: error
+
+  build-android:
+    name: Build Android APK (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: |
+          cd app
+          flutter pub get
+
+      - name: Build Split Release APKs
+        run: |
+          cd app
+          flutter build apk --split-per-abi
+
+      - name: Copy arm64 APK
+        run: |
+          cp app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk P2Pme.apk
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2pme-android-apk
+          path: P2Pme.apk
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-ios, build-android]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download iOS IPA Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: p2pme-ios-ipa
+
+      - name: Download Android APK Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: p2pme-android-apk
+
+      - name: Generate Checksums
+        run: |
+          sha256sum P2Pme.apk > P2Pme.apk.sha256
+          sha256sum P2Pme.ipa > P2Pme.ipa.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            P2Pme.apk
+            P2Pme.ipa
+            P2Pme.apk.sha256
+            P2Pme.ipa.sha256
+          generate_release_notes: true

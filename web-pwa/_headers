@@ -7,3 +7,17 @@
 /sw.js
   Cache-Control: no-cache, no-store, must-revalidate
 
+/altstore-source.json
+  Access-Control-Allow-Origin: *
+  Content-Type: application/json; charset=utf-8
+  Cache-Control: public, max-age=300
+
+/version.json
+  Access-Control-Allow-Origin: *
+  Content-Type: application/json; charset=utf-8
+  Cache-Control: public, max-age=300
+
+/downloads/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=86400
+

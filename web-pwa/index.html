@@ -873,7 +873,7 @@
           </div>
         </div>
 
-        <!-- iPhone & iPad (PWA) -->
+        <!-- iPhone & iPad (Native IPA & Sideloading) -->
         <div class="app-card">
           <div class="app-card-top">
             <div class="app-card-header">
@@ -882,17 +882,38 @@
                   <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.04-7.6-7.85-11.7-14.42-6.01-9.59-10.74-20.47-14.19-32.65-3.46-12.17-5.19-23.76-5.19-34.76 0-14.92 3.65-27.24 10.95-36.96 7.3-9.72 16.59-14.69 27.87-14.92 4.13 0 9.04 1.15 14.73 3.46 5.69 2.31 9.38 3.52 11.08 3.63 1.37-.11 5.3-1.43 11.8-3.95 6.49-2.52 11.75-3.69 15.77-3.52 11.53.64 21.05 4.96 28.56 12.96-10.23 6.19-15.24 14.8-15.03 25.82.21 8.54 3.46 15.77 9.75 21.7 6.29 5.92 13.68 9.38 22.18 10.37-2.13 6.41-4.89 13.25-8.28 20.52zM119.22 33.15c0-7.3 2.66-14.28 7.97-20.93 5.31-6.65 11.96-10.74 19.95-12.27.43 1.09.65 2.18.65 3.27 0 7.2-2.73 14.24-8.19 21.13-5.46 6.88-12.22 10.92-20.28 12.13-.07-1.1-.1-2.2-.1-3.33z"/>
                 </svg>
               </div>
-              <div>
-                <h3 class="app-card-title">iPhone & iPad</h3>
-                <p class="app-card-subtitle">Web app. Add to your Home Screen for quick access.</p>
+              <div style="flex: 1;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <h3 class="app-card-title">iPhone & iPad</h3>
+                  <button onclick="showIosSideloadModal()" title="Sideloading & 7-Day Auto-Refresh Guide" style="background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: #E8EAED; border-radius: 12px; font-size: 11px; padding: 4px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: background 0.15s ease;">
+                    <span style="font-weight: bold;">ⓘ</span> Sideload Guide
+                  </button>
+                </div>
+                <p class="app-card-subtitle">Native iOS app with background photo sync & PhotoKit integration.</p>
               </div>
             </div>
           </div>
-          <div class="app-card-bottom">
-            <div class="app-card-info-box">
-              Tap Safari Share &rarr; Add to Home Screen
+          <div class="app-card-bottom" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <a class="app-card-btn" href="altstore://install?url=https%3A%2F%2Fp2pme.pages.dev%2Fdownloads%2FP2Pme.ipa" style="padding: 10px 6px; font-size: 12px; margin: 0; background: linear-gradient(135deg, #1A73E8 0%, #1557B0 100%);">
+                ⚡ Install with AltStore
+              </a>
+              <a class="app-card-btn" href="sidestore://install?url=https%3A%2F%2Fp2pme.pages.dev%2Fdownloads%2FP2Pme.ipa" style="padding: 10px 6px; font-size: 12px; margin: 0; background: #303134; border: 1px solid var(--card-border);">
+                📲 Install with SideStore
+              </a>
             </div>
-            <div class="app-card-caption">Zero install • PWA auto-updates • Wi-Fi speed</div>
+            <div style="display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 2px;">
+              <a href="/downloads/P2Pme.ipa" download style="font-size: 11px; color: var(--text-muted); text-decoration: underline; padding: 3px 6px;">
+                Download Raw .IPA
+              </a>
+              <span style="color: var(--card-border);">•</span>
+              <a href="altstore://source?url=https%3A%2F%2Fp2pme.pages.dev%2Faltstore-source.json" style="font-size: 11px; color: #8AB4F8; text-decoration: none; padding: 3px 6px; font-weight: 600;">
+                + Add AltStore Source
+              </a>
+            </div>
+            <div class="app-card-caption" style="margin-top: 4px;">
+              Or instant Web App: Safari Share &rarr; Add to Home Screen (Zero install, never expires)
+            </div>
           </div>
         </div>
       </div>
@@ -1018,6 +1039,124 @@
 
       <div style="margin-top: 18px; display: flex; justify-content: flex-end;">
         <button onclick="hideHubInfoModal()" style="background: var(--google-blue); color: white; border: none; border-radius: 20px; padding: 8px 22px; font-size: 12px; font-weight: 700; cursor: pointer;">
+          Got it
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- iOS Sideloading & 7-Day Auto-Refresh Guide Modal -->
+  <div id="iosSideloadModal" class="hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; z-index: 2200; padding: 16px;">
+    <div style="background: #303134; border: 1px solid var(--card-border); border-radius: 24px; padding: 22px; width: 100%; max-width: 500px; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 48px rgba(0,0,0,0.7); box-sizing: border-box; text-align: left;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <svg viewBox="0 0 170 170" width="24" height="24" fill="#FFFFFF">
+            <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.04-7.6-7.85-11.7-14.42-6.01-9.59-10.74-20.47-14.19-32.65-3.46-12.17-5.19-23.76-5.19-34.76 0-14.92 3.65-27.24 10.95-36.96 7.3-9.72 16.59-14.69 27.87-14.92 4.13 0 9.04 1.15 14.73 3.46 5.69 2.31 9.38 3.52 11.08 3.63 1.37-.11 5.3-1.43 11.8-3.95 6.49-2.52 11.75-3.69 15.77-3.52 11.53.64 21.05 4.96 28.56 12.96-10.23 6.19-15.24 14.8-15.03 25.82.21 8.54 3.46 15.77 9.75 21.7 6.29 5.92 13.68 9.38 22.18 10.37-2.13 6.41-4.89 13.25-8.28 20.52zM119.22 33.15c0-7.3 2.66-14.28 7.97-20.93 5.31-6.65 11.96-10.74 19.95-12.27.43 1.09.65 2.18.65 3.27 0 7.2-2.73 14.24-8.19 21.13-5.46 6.88-12.22 10.92-20.28 12.13-.07-1.1-.1-2.2-.1-3.33z"/>
+          </svg>
+          <div>
+            <h3 style="font-size: 17px; font-weight: 700; margin: 0; color: var(--text);">iOS Sideloading & Auto-Refresh</h3>
+            <p style="font-size: 11px; color: var(--text-muted); margin: 2px 0 0 0;">How to install .IPA and bypass the 7-day limit</p>
+          </div>
+        </div>
+        <button onclick="hideIosSideloadModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 4px;">&times;</button>
+      </div>
+
+      <!-- Segmented Tab Nav -->
+      <div style="display: flex; gap: 4px; background: rgba(0,0,0,0.25); padding: 4px; border-radius: 14px; margin-bottom: 14px;">
+        <button id="iosTabBtn1" onclick="switchIosTab(1)" style="flex: 1; padding: 8px 4px; font-size: 11px; font-weight: 700; border-radius: 10px; border: none; cursor: pointer; background: #1A73E8; color: white; display: flex; align-items: center; justify-content: center; gap: 4px;">
+          ⚡ AltStore
+        </button>
+        <button id="iosTabBtn2" onclick="switchIosTab(2)" style="flex: 1; padding: 8px 4px; font-size: 11px; font-weight: 600; border-radius: 10px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 4px;">
+          📲 SideStore
+        </button>
+        <button id="iosTabBtn3" onclick="switchIosTab(3)" style="flex: 1; padding: 8px 4px; font-size: 11px; font-weight: 600; border-radius: 10px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 4px;">
+          💻 Sideloadly
+        </button>
+        <button id="iosTabBtn4" onclick="switchIosTab(4)" style="flex: 1; padding: 8px 4px; font-size: 11px; font-weight: 600; border-radius: 10px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 4px;">
+          🌐 Web PWA
+        </button>
+      </div>
+
+      <!-- TAB 1: AltStore -->
+      <div id="iosTabContent1">
+        <div style="background: rgba(26, 115, 232, 0.1); border: 1px solid rgba(26, 115, 232, 0.3); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 700; color: #8AB4F8; margin-bottom: 4px;">⚡ Wi-Fi Automated Background Refresh</div>
+          <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
+            Apple limits free personal Apple ID certificates to <strong>7 days</strong>. AltStore solves this by automatically re-signing P2Pme in the background over home Wi-Fi whenever your PC or Mac is running.
+          </div>
+        </div>
+        <ol style="font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0; padding-left: 18px;">
+          <li>Install AltStore on your iPhone using <strong>AltServer</strong> on your PC/Mac once (<a href="https://altstore.io" target="_blank" style="color: #8AB4F8;">altstore.io</a>).</li>
+          <li>Tap <strong>Install with AltStore</strong> on this website. AltStore opens, downloads the .IPA, and signs it.</li>
+          <li>Tap <strong>+ Add AltStore Source</strong> so AltStore automatically notifies you of updates and refreshes signatures before 7 days expire!</li>
+        </ol>
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
+          <a href="altstore://install?url=https%3A%2F%2Fp2pme.pages.dev%2Fdownloads%2FP2Pme.ipa" class="action-btn" style="flex: 1; margin: 0; padding: 8px 12px; font-size: 11px; border-radius: 14px; text-align: center; text-decoration: none;">
+            ⚡ Open in AltStore
+          </a>
+          <a href="altstore://source?url=https%3A%2F%2Fp2pme.pages.dev%2Faltstore-source.json" class="action-btn" style="flex: 1; margin: 0; padding: 8px 12px; font-size: 11px; border-radius: 14px; background: #303134; border: 1px solid var(--card-border); text-align: center; text-decoration: none; color: #8AB4F8;">
+            + Add Source
+          </a>
+        </div>
+      </div>
+
+      <!-- TAB 2: SideStore -->
+      <div id="iosTabContent2" style="display: none;">
+        <div style="background: rgba(2, 132, 199, 0.1); border: 1px solid rgba(2, 132, 199, 0.3); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 700; color: #38BDF8; margin-bottom: 4px;">📲 100% Computer-Free On-Device Refresh</div>
+          <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
+            SideStore is a fork of AltStore that runs an internal WireGuard loopback VPN directly on your iPhone. It re-signs and refreshes apps on any Wi-Fi <strong>without ever needing a computer again</strong>.
+          </div>
+        </div>
+        <ol style="font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0; padding-left: 18px;">
+          <li>Install SideStore onto your device once (<a href="https://sidestore.io" target="_blank" style="color: #38BDF8;">sidestore.io</a>).</li>
+          <li>Ensure SideStore's local WireGuard VPN is turned ON in Settings.</li>
+          <li>Tap <strong>Install with SideStore</strong> below. SideStore downloads, signs, and refreshes P2Pme autonomously!</li>
+        </ol>
+        <div style="margin-top: 12px;">
+          <a href="sidestore://install?url=https%3A%2F%2Fp2pme.pages.dev%2Fdownloads%2FP2Pme.ipa" class="action-btn" style="display: block; margin: 0; padding: 8px 12px; font-size: 11px; border-radius: 14px; text-align: center; text-decoration: none;">
+            📲 Open in SideStore
+          </a>
+        </div>
+      </div>
+
+      <!-- TAB 3: Sideloadly & TrollStore -->
+      <div id="iosTabContent3" style="display: none;">
+        <div style="background: rgba(52, 168, 83, 0.1); border: 1px solid rgba(52, 168, 83, 0.3); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 700; color: #34A853; margin-bottom: 4px;">💻 Desktop Sideloadly & Permanent TrollStore</div>
+          <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
+            For users who prefer simple desktop drag-and-drop or have devices supported by TrollStore.
+          </div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+          <p style="margin: 0 0 8px 0;"><strong>Sideloadly (PC/Mac):</strong> Download <a href="/downloads/P2Pme.ipa" download style="color: #8AB4F8;">P2Pme.ipa</a>, drag it into Sideloadly, and check <em>Automatic Wi-Fi Refresh</em>. When your PC is on the same Wi-Fi, it auto-refreshes seamlessly.</p>
+          <p style="margin: 0;"><strong>TrollStore (iOS 14.0–17.0):</strong> If your device supports TrollStore (CoreTrust vulnerability), open P2Pme.ipa in TrollStore for <strong>permanent installation with zero 7-day expiration and zero revokes</strong>.</p>
+        </div>
+        <div style="margin-top: 12px;">
+          <a href="/downloads/P2Pme.ipa" download class="action-btn" style="display: block; margin: 0; padding: 8px 12px; font-size: 11px; border-radius: 14px; text-align: center; text-decoration: none; background: #303134; border: 1px solid var(--card-border);">
+            📥 Download P2Pme.ipa
+          </a>
+        </div>
+      </div>
+
+      <!-- TAB 4: Instant Web PWA -->
+      <div id="iosTabContent4" style="display: none;">
+        <div style="background: rgba(255, 255, 255, 0.08); border: 1px solid var(--card-border); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 700; color: #FFFFFF; margin-bottom: 4px;">🌐 Zero-Install Safari Web App</div>
+          <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
+            No sideloading, no computers, no certificates, and <strong>zero expiration</strong>.
+          </div>
+        </div>
+        <ol style="font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0; padding-left: 18px;">
+          <li>In Safari, tap the <strong>Share</strong> button (box with upward arrow) at the bottom.</li>
+          <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+          <li>Tap <strong>Add</strong> in the top-right corner.</li>
+          <li>Launch P2Pme from your home screen for full-screen photo browsing and 1-tap backup!</li>
+        </ol>
+      </div>
+
+      <div style="margin-top: 18px; display: flex; justify-content: flex-end;">
+        <button onclick="hideIosSideloadModal()" style="background: var(--google-blue); color: white; border: none; border-radius: 20px; padding: 8px 22px; font-size: 12px; font-weight: 700; cursor: pointer;">
           Got it
         </button>
       </div>

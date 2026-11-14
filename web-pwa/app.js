@@ -827,6 +827,43 @@
     }
   };
 
+  // iOS Sideloading & 7-Day Auto-Refresh Modal Handlers
+  window.showIosSideloadModal = function() {
+    const modal = document.getElementById('iosSideloadModal');
+    if (modal) modal.classList.remove('hidden');
+  };
+
+  window.hideIosSideloadModal = function() {
+    const modal = document.getElementById('iosSideloadModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.switchIosTab = function(idx) {
+    const tabs = [1, 2, 3, 4];
+    tabs.forEach(t => {
+      const btn = document.getElementById('iosTabBtn' + t);
+      const content = document.getElementById('iosTabContent' + t);
+      if (btn) {
+        btn.style.background = 'transparent';
+        btn.style.color = 'var(--text-muted)';
+        btn.style.fontWeight = '600';
+      }
+      if (content) content.style.display = 'none';
+    });
+
+    const activeBtn = document.getElementById('iosTabBtn' + idx);
+    const activeContent = document.getElementById('iosTabContent' + idx);
+    if (activeBtn) {
+      if (idx === 1) activeBtn.style.background = '#1A73E8';
+      else if (idx === 2) activeBtn.style.background = '#0284C7';
+      else if (idx === 3) activeBtn.style.background = '#34A853';
+      else if (idx === 4) activeBtn.style.background = '#5F6368';
+      activeBtn.style.color = 'white';
+      activeBtn.style.fontWeight = '700';
+    }
+    if (activeContent) activeContent.style.display = 'block';
+  };
+
   window.removeHub = function(id) {
     if (!confirm('Forget this saved 24/7 Home Hub?')) return;
     const hubs = getSavedHubs().filter(h => h.id !== id);
