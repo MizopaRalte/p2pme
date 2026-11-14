@@ -210,15 +210,18 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  static const int currentVersionCode = 3;
-  static const String currentVersionName = '1.0.2';
+  static const int currentVersionCode = 4;
+  static const String currentVersionName = '1.0.3';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
   String? _updateDownloadUrl;
   bool _isCheckingUpdates = false;
+  bool _isDownloadingUpdate = false;
+  double _downloadProgress = 0.0;
+  String? _downloadStatusText;
 
-  Future<void> _checkForAppUpdates({bool manual = false}) async {
+  Future<void> _checkForAppUpdates({bool manual = false, VoidCallback? onComplete}) async {
     if (_isCheckingUpdates) return;
     setState(() => _isCheckingUpdates = true);
     try {
@@ -242,10 +245,11 @@ class _HomeScreenState extends State<HomeScreen> {
             _updateDownloadUrl = targetUrl;
             _updateAvailable = (remoteCode > currentVersionCode);
           });
+          onComplete?.call();
           if (manual && !_updateAvailable) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('✓ P2Pme is up to date (v1.0.2)'),
+                content: Text('✓ P2Pme is up to date (v$currentVersionName)'),
                 backgroundColor: GooglePhotosColors.green,
               ),
             );
@@ -261,14 +265,100 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) {
         setState(() => _isCheckingUpdates = false);
+        onComplete?.call();
       }
     }
   }
 
-  void _openDownloadUrl(String url) {
+  Future<void> _downloadAndInstallUpdate({VoidCallback? onProgressUpdate}) async {
+    if (_isDownloadingUpdate || _updateDownloadUrl == null) return;
+    setState(() {
+      _isDownloadingUpdate = true;
+      _downloadProgress = 0.0;
+      _downloadStatusText = 'Starting download...';
+    });
+    onProgressUpdate?.call();
+
+    try {
+      final url = _updateDownloadUrl!;
+      if (Platform.isAndroid) {
+        String downloadDirPath = '/storage/emulated/0/Download';
+        try {
+          final res = await _bgChannel.invokeMethod<String>('getDownloadDir');
+          if (res != null && res.isNotEmpty) {
+            downloadDirPath = res;
+          }
+        } catch (_) {}
+        final downloadDir = Directory(downloadDirPath);
+        if (!await downloadDir.exists()) {
+          await downloadDir.create(recursive: true);
+        }
+        final targetFile = File('${downloadDir.path}${Platform.pathSeparator}P2Pme_update.apk');
+        if (await targetFile.exists()) {
+          await targetFile.delete();
+        }
+
+        final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+        final req = await client.getUrl(Uri.parse(url));
+        final resp = await req.close();
+        if (resp.statusCode != HttpStatus.ok) {
+          throw Exception('Server returned ${resp.statusCode}');
+        }
+
+        final total = resp.contentLength;
+        int received = 0;
+        final sink = targetFile.openWrite();
+
+        await for (final chunk in resp) {
+          sink.add(chunk);
+          received += chunk.length;
+          if (mounted) {
+            setState(() {
+              _downloadProgress = total > 0 ? (received / total) : 0.5;
+              final mbRecv = (received / (1024 * 1024)).toStringAsFixed(1);
+              final mbTot = total > 0 ? (total / (1024 * 1024)).toStringAsFixed(1) : '?';
+              _downloadStatusText = '$mbRecv / $mbTot MB (${(_downloadProgress * 100).toInt()}%)';
+            });
+            onProgressUpdate?.call();
+          }
+        }
+        await sink.flush();
+        await sink.close();
+
+        if (mounted) {
+          setState(() {
+            _downloadStatusText = 'Launching installer...';
+          });
+          onProgressUpdate?.call();
+        }
+
+        // Trigger native Android package installer
+        await _bgChannel.invokeMethod('installApk', {'filePath': targetFile.path});
+      } else {
+        await _openDownloadUrl(url);
+      }
+    } catch (e) {
+      debugPrint('Update download failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Download failed: $e')),
+        );
+        _openDownloadUrl(_updateDownloadUrl!);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDownloadingUpdate = false;
+        });
+        onProgressUpdate?.call();
+      }
+    }
+  }
+
+  Future<void> _openDownloadUrl(String url) async {
     try {
       if (Platform.isAndroid) {
-        Process.run('am', ['start', '-a', 'android.intent.action.VIEW', '-d', url]);
+        await _bgChannel.invokeMethod('openBrowserUrl', {'url': url});
       } else if (Platform.isWindows) {
         Process.run('cmd', ['/c', 'start', '', url]);
       } else if (Platform.isMacOS) {
@@ -1206,11 +1296,15 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Update available: v${_latestVersionName ?? ""}',
+                  _isDownloadingUpdate
+                      ? 'Downloading update...'
+                      : 'Update available: v${_latestVersionName ?? ""}',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
                 Text(
-                  _updateReleaseNotes ?? 'Tap to download the latest P2Pme version.',
+                  _isDownloadingUpdate
+                      ? (_downloadStatusText ?? 'Please wait...')
+                      : (_updateReleaseNotes ?? 'Tap to download & install the latest version.'),
                   style: TextStyle(
                     fontSize: 11,
                     color: isDark ? const Color(0xFFBDC1C6) : const Color(0xFF5F6368),
@@ -1218,6 +1312,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+                if (_isDownloadingUpdate) ...[
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: _downloadProgress > 0 ? _downloadProgress : null,
+                      minHeight: 4,
+                      backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                      color: GooglePhotosColors.green,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1229,17 +1335,15 @@ class _HomeScreenState extends State<HomeScreen> {
               minimumSize: const Size(60, 32),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
-            onPressed: () {
-              if (_updateDownloadUrl != null) {
-                _openDownloadUrl(_updateDownloadUrl!);
-              }
-            },
-            child: const Text('Update', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            onPressed: _isDownloadingUpdate ? null : () => _downloadAndInstallUpdate(),
+            child: _isDownloadingUpdate
+                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Update', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           ),
           const SizedBox(width: 4),
           IconButton(
             icon: const Icon(Icons.close, size: 16),
-            onPressed: () => setState(() => _updateAvailable = false),
+            onPressed: _isDownloadingUpdate ? null : () => setState(() => _updateAvailable = false),
           ),
         ],
       ),
@@ -3675,48 +3779,129 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showDiagnostics(BuildContext context) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.all(22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'P2Pme System Diagnostics',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'P2Pme System Diagnostics',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 14),
+                  _diagRow('Rust Core Engine', _isEngineReady ? 'Active (Native FFI)' : 'Initializing'),
+                  _diagRow('Node ID', _nodeId ?? 'node_auto_gen'),
+                  _diagRow('Listening Port', _listeningPort > 0 ? '$_listeningPort (QUIC)' : '45454 (UDP)'),
+                  _diagRow('Encryption', 'TLS 1.3 End-to-End'),
+                  _diagRow('Integrity Check', 'BLAKE3 Cryptographic Chunking'),
+                  _diagRow('Zero-Custody', 'Direct Peer-to-Peer (No Cloud Servers)'),
+                  _diagRow('App Version', 'v$currentVersionName (build $currentVersionCode)'),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(40),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    icon: _isCheckingUpdates
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.refresh_rounded, size: 16),
+                    label: const Text('Check for Updates', style: TextStyle(fontSize: 12)),
+                    onPressed: _isCheckingUpdates
+                        ? null
+                        : () {
+                            setModalState(() {});
+                            _checkForAppUpdates(manual: true, onComplete: () {
+                              if (context.mounted) setModalState(() {});
+                            });
+                          },
+                  ),
+                  if (_updateAvailable) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: GooglePhotosColors.blueSurface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: GooglePhotosColors.blue.withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Update Available: v${_latestVersionName ?? ""}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: GooglePhotosColors.blue),
+                              ),
+                              const Icon(Icons.system_update_rounded, size: 18, color: GooglePhotosColors.blue),
+                            ],
+                          ),
+                          if (_updateReleaseNotes != null) ...[
+                            const SizedBox(height: 4),
+                            Text(_updateReleaseNotes!, style: const TextStyle(fontSize: 11, color: Colors.black87)),
+                          ],
+                          if (_isDownloadingUpdate) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              _downloadStatusText ?? 'Downloading update...',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.blue),
+                            ),
+                            const SizedBox(height: 4),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: _downloadProgress > 0 ? _downloadProgress : null,
+                                minHeight: 4,
+                                backgroundColor: Colors.grey.shade300,
+                                color: GooglePhotosColors.blue,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 10),
+                          FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: GooglePhotosColors.blue,
+                              minimumSize: const Size.fromHeight(40),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            ),
+                            icon: _isDownloadingUpdate
+                                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                : const Icon(Icons.download_rounded, size: 16),
+                            label: Text(
+                              _isDownloadingUpdate
+                                  ? 'Downloading...'
+                                  : 'Download & Install Directly',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: _isDownloadingUpdate
+                                ? null
+                                : () => _downloadAndInstallUpdate(onProgressUpdate: () {
+                                      if (context.mounted) setModalState(() {});
+                                    }),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Close'),
+                  ),
+                ],
               ),
-              const SizedBox(height: 14),
-              _diagRow('Rust Core Engine', _isEngineReady ? 'Active (Native FFI)' : 'Initializing'),
-              _diagRow('Node ID', _nodeId ?? 'node_auto_gen'),
-              _diagRow('Listening Port', _listeningPort > 0 ? '$_listeningPort (QUIC)' : '45454 (UDP)'),
-              _diagRow('Encryption', 'TLS 1.3 End-to-End'),
-              _diagRow('Integrity Check', 'BLAKE3 Cryptographic Chunking'),
-              _diagRow('Zero-Custody', 'Direct Peer-to-Peer (No Cloud Servers)'),
-              _diagRow('App Version', 'v$currentVersionName (build $currentVersionCode)'),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(40),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-                icon: _isCheckingUpdates
-                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Check for Updates', style: TextStyle(fontSize: 12)),
-                onPressed: _isCheckingUpdates ? null : () => _checkForAppUpdates(manual: true),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
