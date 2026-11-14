@@ -1,10 +1,13 @@
-// P2Pme Service Worker - Offline PWA Support
-const CACHE_NAME = 'p2pme-v4';
+// P2Pme Service Worker - 100% Offline PWA Support
+const CACHE_NAME = 'p2pme-v5';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
-  './app.js'
+  './app.js',
+  './qrcode.min.js',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
