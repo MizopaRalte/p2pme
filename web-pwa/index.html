@@ -701,9 +701,14 @@
                   <div id="homeHubCardAddr" style="font-size: 11px; color: var(--text-muted); font-family: monospace;">192.168.178.35:45455</div>
                 </div>
               </div>
-              <span class="status-badge" style="background: rgba(52, 168, 83, 0.15); color: #34A853; border-color: rgba(52, 168, 83, 0.3); font-size: 10px; padding: 3px 8px;">
-                <span class="status-dot" style="background: #34A853;"></span> 24/7 HUB
-              </span>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <button onclick="showHubInfoModal()" title="How to Connect From Anywhere" style="background: rgba(255, 255, 255, 0.08); border: 1px solid var(--card-border); color: #E8EAED; border-radius: 12px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px; font-weight: bold; transition: background 0.15s ease;">
+                  ⓘ
+                </button>
+                <span class="status-badge" style="background: rgba(52, 168, 83, 0.15); color: #34A853; border-color: rgba(52, 168, 83, 0.3); font-size: 10px; padding: 3px 8px;">
+                  <span class="status-dot" style="background: #34A853;"></span> 24/7 HUB
+                </span>
+              </div>
             </div>
             <button id="btnSendToHub" onclick="sendSelectedToHub()" class="action-btn" style="margin: 0; background: linear-gradient(135deg, #1A73E8 0%, #174EA6 100%); padding: 12px; font-size: 13px; border-radius: 20px; box-shadow: 0 4px 14px rgba(26, 115, 232, 0.35); cursor: pointer;">
               <span>🚀</span> Send to Home Android Hub (No PIN)
@@ -788,9 +793,14 @@
               Transfer photos anytime to your saved home server without re-pairing.
             </p>
           </div>
-          <button onclick="showAddHubModal()" class="header-nav-btn" style="background: rgba(26, 115, 232, 0.15); color: #8AB4F8; border: 1px solid rgba(26, 115, 232, 0.3); border-radius: 20px; font-size: 12px; padding: 6px 14px; cursor: pointer;">
-            + Add Hub
-          </button>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button onclick="showHubInfoModal()" class="header-nav-btn" title="How to Connect From Anywhere" style="background: rgba(255, 255, 255, 0.08); color: #E8EAED; border: 1px solid var(--card-border); border-radius: 20px; font-size: 12px; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;">
+              <span style="font-size: 13px; font-weight: bold;">ⓘ</span> How to Connect
+            </button>
+            <button onclick="showAddHubModal()" class="header-nav-btn" style="background: rgba(26, 115, 232, 0.15); color: #8AB4F8; border: 1px solid rgba(26, 115, 232, 0.3); border-radius: 20px; font-size: 12px; padding: 6px 14px; cursor: pointer;">
+              + Add Hub
+            </button>
+          </div>
         </div>
 
         <div id="knownHubsList"></div>
@@ -923,6 +933,93 @@
       <div style="display: flex; gap: 10px; justify-content: flex-end;">
         <button onclick="hideAddHubModal()" class="header-nav-btn" style="background: transparent; border: 1px solid var(--card-border); border-radius: 20px; padding: 8px 18px; cursor: pointer;">Cancel</button>
         <button onclick="saveHubFromModal()" class="action-btn" style="width: auto; margin: 0; background: var(--google-blue); border-radius: 20px; padding: 8px 22px; cursor: pointer;">Save Hub</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connect From Anywhere & 24/7 Home Hub Guide Modal -->
+  <div id="hubInfoModal" class="hidden" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; z-index: 2200; padding: 16px;">
+    <div style="background: #303134; border: 1px solid var(--card-border); border-radius: 24px; padding: 22px; width: 100%; max-width: 490px; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 48px rgba(0,0,0,0.7); box-sizing: border-box; text-align: left;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 22px;">🌐</span>
+          <div>
+            <h3 style="font-size: 17px; font-weight: 700; margin: 0; color: var(--text);">How to Connect From Anywhere</h3>
+            <p style="font-size: 11px; color: var(--text-muted); margin: 2px 0 0 0;">Zero cloud custody • End-to-end direct encrypted P2P</p>
+          </div>
+        </div>
+        <button onclick="hideHubInfoModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 4px;">✕</button>
+      </div>
+
+      <!-- Segmented Tabs for Methods -->
+      <div style="display: flex; gap: 6px; background: #202124; padding: 4px; border-radius: 16px; margin-bottom: 16px;">
+        <button id="infoTabBtn1" onclick="switchInfoTab(1)" style="flex: 1; padding: 8px 6px; font-size: 11px; font-weight: 700; border-radius: 12px; border: none; cursor: pointer; background: #1A73E8; color: white; display: flex; align-items: center; justify-content: center; gap: 5px;">
+          <span>🌐</span> WebRTC P2P
+        </button>
+        <button id="infoTabBtn2" onclick="switchInfoTab(2)" style="flex: 1; padding: 8px 6px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 5px;">
+          <span>🔒</span> Private Mesh
+        </button>
+        <button id="infoTabBtn3" onclick="switchInfoTab(3)" style="flex: 1; padding: 8px 6px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 5px;">
+          <!-- Official Apple Logo SVG -->
+          <svg viewBox="0 0 170 170" width="13" height="13" fill="currentColor">
+            <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.04-7.6-7.85-11.7-14.42-6.01-9.59-10.74-20.47-14.19-32.65-3.46-12.17-5.19-23.76-5.19-34.76 0-14.92 3.65-27.24 10.95-36.96 7.3-9.72 16.59-14.69 27.87-14.92 4.13 0 9.04 1.15 14.73 3.46 5.69 2.31 9.38 3.52 11.08 3.63 1.37-.11 5.3-1.43 11.8-3.95 6.49-2.52 11.75-3.69 15.77-3.52 11.53.64 21.05 4.96 28.56 12.96-10.23 6.19-15.24 14.8-15.03 25.82.21 8.54 3.46 15.77 9.75 21.7 6.29 5.92 13.68 9.38 22.18 10.37-2.13 6.41-4.89 13.25-8.28 20.52zM119.22 33.15c0-7.3 2.66-14.28 7.97-20.93 5.31-6.65 11.96-10.74 19.95-12.27.43 1.09.65 2.18.65 3.27 0 7.2-2.73 14.24-8.19 21.13-5.46 6.88-12.22 10.92-20.28 12.13-.07-1.1-.1-2.2-.1-3.33z"/>
+          </svg>
+          Apple iOS
+        </button>
+      </div>
+
+      <!-- TAB 1: WebRTC Direct -->
+      <div id="infoTabContent1">
+        <div style="background: rgba(26, 115, 232, 0.1); border: 1px solid rgba(26, 115, 232, 0.3); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 700; color: #8AB4F8; margin-bottom: 4px;">🚀 Zero-Install Direct P2P</div>
+          <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
+            Uses Google STUN (<code>stun.l.google.com:19302</code>) to punch through home router firewalls directly in Safari and Chrome. No VPN or port forwarding needed.
+          </div>
+        </div>
+        <ol style="font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0; padding-left: 18px;">
+          <li>Keep your Home Android Phone plugged in and connected to your home Wi-Fi with P2Pme running.</li>
+          <li>Save the Hub with your home IP address or remote hostname.</li>
+          <li>When you are outside on 5G or foreign Wi-Fi, tap <strong>Send to Home Hub</strong>. P2Pme establishes a direct encrypted WebRTC DataChannel to deliver your photos.</li>
+        </ol>
+      </div>
+
+      <!-- TAB 2: Private Mesh (Tailscale) -->
+      <div id="infoTabContent2" style="display: none;">
+        <div style="background: rgba(52, 168, 83, 0.1); border: 1px solid rgba(52, 168, 83, 0.3); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 700; color: #34A853; margin-bottom: 4px;">🏆 Recommended Gold Standard</div>
+          <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
+            End-to-end WireGuard encrypted mesh. 100% zero open router ports. Continuous automated sync from any 5G/cellular network.
+          </div>
+        </div>
+        <ol style="font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0; padding-left: 18px;">
+          <li>Install the free <strong>Tailscale</strong> app on your Home Android phone and your travel device (iPhone, PC, or Android).</li>
+          <li>Log in with the same account (Google/Apple/GitHub).</li>
+          <li>Copy your home phone's private Tailscale IP (e.g. <code>100.85.120.44</code>).</li>
+          <li>In P2Pme, save it as your 24/7 Home Hub. You can now backup anytime from anywhere in the world!</li>
+        </ol>
+      </div>
+
+      <!-- TAB 3: Apple iOS Native -->
+      <div id="infoTabContent3" style="display: none;">
+        <div style="background: rgba(255, 255, 255, 0.08); border: 1px solid var(--card-border); border-radius: 14px; padding: 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+          <svg viewBox="0 0 170 170" width="24" height="24" fill="#FFFFFF">
+            <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.04-7.6-7.85-11.7-14.42-6.01-9.59-10.74-20.47-14.19-32.65-3.46-12.17-5.19-23.76-5.19-34.76 0-14.92 3.65-27.24 10.95-36.96 7.3-9.72 16.59-14.69 27.87-14.92 4.13 0 9.04 1.15 14.73 3.46 5.69 2.31 9.38 3.52 11.08 3.63 1.37-.11 5.3-1.43 11.8-3.95 6.49-2.52 11.75-3.69 15.77-3.52 11.53.64 21.05 4.96 28.56 12.96-10.23 6.19-15.24 14.8-15.03 25.82.21 8.54 3.46 15.77 9.75 21.7 6.29 5.92 13.68 9.38 22.18 10.37-2.13 6.41-4.89 13.25-8.28 20.52zM119.22 33.15c0-7.3 2.66-14.28 7.97-20.93 5.31-6.65 11.96-10.74 19.95-12.27.43 1.09.65 2.18.65 3.27 0 7.2-2.73 14.24-8.19 21.13-5.46 6.88-12.22 10.92-20.28 12.13-.07-1.1-.1-2.2-.1-3.33z"/>
+          </svg>
+          <div>
+            <div style="font-size: 13px; font-weight: 700; color: #FFFFFF;">Apple iOS Camera Roll Sync</div>
+            <div style="font-size: 11px; color: var(--text-muted);">BackgroundTasks & PhotoKit Integration</div>
+          </div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+          <p style="margin: 0 0 8px 0;"><strong>Web PWA (Current):</strong> Tap Safari Share &rarr; <em>Add to Home Screen</em>. Instant zero-install access with 1-tap backup.</p>
+          <p style="margin: 0;"><strong>Native iOS App (Configured):</strong> Supports automated background camera roll backup whenever you take new photos, using native iOS background processing.</p>
+        </div>
+      </div>
+
+      <div style="margin-top: 18px; display: flex; justify-content: flex-end;">
+        <button onclick="hideHubInfoModal()" style="background: var(--google-blue); color: white; border: none; border-radius: 20px; padding: 8px 22px; font-size: 12px; font-weight: 700; cursor: pointer;">
+          Got it
+        </button>
       </div>
     </div>
   </div>

@@ -785,6 +785,48 @@
     hideAddHubModal();
   };
 
+  // Hub Info & Guidance Modal Handlers
+  window.showHubInfoModal = function() {
+    const modal = document.getElementById('hubInfoModal');
+    if (modal) modal.classList.remove('hidden');
+  };
+
+  window.hideHubInfoModal = function() {
+    const modal = document.getElementById('hubInfoModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.switchInfoTab = function(idx) {
+    const btn1 = document.getElementById('infoTabBtn1');
+    const btn2 = document.getElementById('infoTabBtn2');
+    const btn3 = document.getElementById('infoTabBtn3');
+    const c1 = document.getElementById('infoTabContent1');
+    const c2 = document.getElementById('infoTabContent2');
+    const c3 = document.getElementById('infoTabContent3');
+
+    [btn1, btn2, btn3].forEach(b => {
+      if (b) {
+        b.style.background = 'transparent';
+        b.style.color = 'var(--text-muted)';
+        b.style.fontWeight = '600';
+      }
+    });
+    [c1, c2, c3].forEach(c => {
+      if (c) c.style.display = 'none';
+    });
+
+    if (idx === 1) {
+      if (btn1) { btn1.style.background = '#1A73E8'; btn1.style.color = 'white'; btn1.style.fontWeight = '700'; }
+      if (c1) c1.style.display = 'block';
+    } else if (idx === 2) {
+      if (btn2) { btn2.style.background = '#34A853'; btn2.style.color = 'white'; btn2.style.fontWeight = '700'; }
+      if (c2) c2.style.display = 'block';
+    } else if (idx === 3) {
+      if (btn3) { btn3.style.background = '#5F6368'; btn3.style.color = 'white'; btn3.style.fontWeight = '700'; }
+      if (c3) c3.style.display = 'block';
+    }
+  };
+
   window.removeHub = function(id) {
     if (!confirm('Forget this saved 24/7 Home Hub?')) return;
     const hubs = getSavedHubs().filter(h => h.id !== id);
@@ -839,13 +881,15 @@
       }
 
       try {
-        const uploadUrl = `${uploadUrlBase}?name=${encodeURIComponent(file.name)}`;
+        const hubToken = hub.token || localStorage.getItem('p2pme_hub_token') || '';
+        const uploadUrl = `${uploadUrlBase}?name=${encodeURIComponent(file.name)}&token=${encodeURIComponent(hubToken)}`;
         const res = await fetch(uploadUrl, {
           method: 'POST',
           body: file,
           mode: 'cors',
           headers: {
-            'Content-Type': file.type || 'application/octet-stream'
+            'Content-Type': file.type || 'application/octet-stream',
+            'x-p2pme-token': hubToken
           }
         });
 
