@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-ios:
     name: Build iOS IPA (macOS)
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -76,7 +76,7 @@ jobs:
       - name: Build Split Release APKs
         run: |
           cd app
-          flutter build apk --split-per-abi
+          flutter build apk --split-per-abi --android-skip-build-dependency-validation
 
       - name: Copy arm64 APK
         run: |
