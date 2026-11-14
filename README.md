@@ -1,4 +1,4 @@
-# P2Pme ⚡
+# <img src="web-pwa/icon-192.png" width="36" height="36" alt="P2Pme" align="absmiddle"> P2Pme
 
 > **Pure Peer-to-Peer Data Replication & One-Time Ephemeral Drop**  
 > *Zero cloud custody. 100% private. Cross-platform.*
@@ -25,7 +25,7 @@
 
 ## Key Features
 
-### ⚡ 1. One-Time Secure Quick Drop
+### 📸 1. One-Time Secure Quick Drop
 * **6-Digit PIN & Dynamic QR Code:** Share a simple 6-digit PIN or let nearby devices scan the on-screen QR code.
 * **Brute-Force Self-Destruct Lockout:** 3 incorrect PIN attempts automatically wipes the in-memory session.
 * **Instant Self-Destruction:** Session and ephemeral cryptographic secrets vanish the moment files are downloaded.
