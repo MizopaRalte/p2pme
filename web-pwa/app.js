@@ -69,6 +69,14 @@
     }
 
     try {
+      if (tab === 'drop' && !window.location.hash.includes('pin=') && !window.location.hash.includes('mode=')) {
+        history.replaceState(null, '', window.location.pathname);
+      } else if (tab !== 'drop') {
+        history.replaceState(null, '', `${window.location.pathname}#tab=${tab}`);
+      }
+    } catch (_) {}
+
+    try {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (_) {}
   };
@@ -622,7 +630,7 @@
   };
 
   // URL Hash auto-fill & deep-linking
-  window.addEventListener('DOMContentLoaded', () => {
+  function handleHashRoute() {
     try {
       const savedPhoneIp = localStorage.getItem('p2pme_saved_phone_ip');
       const phoneIpInput = document.getElementById('phoneIpInput');
@@ -647,7 +655,14 @@
       window.setDropMode('recv');
       if (recvPinInput) recvPinInput.value = pin;
     }
-  });
+  }
+
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', handleHashRoute);
+  } else {
+    handleHashRoute();
+  }
+  window.addEventListener('hashchange', handleHashRoute);
 
   // PWA Service Worker Registration
   if ('serviceWorker' in navigator) {
