@@ -102,11 +102,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: p2pme-ios-ipa
+          path: .
 
       - name: Download Android APK Artifact
         uses: actions/download-artifact@v4
         with:
           name: p2pme-android-apk
+          path: .
 
       - name: Generate Checksums
         run: |
