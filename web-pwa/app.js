@@ -212,8 +212,12 @@
         selectedList.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Processing selected photos...</div>';
       }
       setTimeout(() => {
-        selectedFiles = files;
+        // Accumulate newly selected files with existing selection without duplicates
+        const existingKeys = new Set(selectedFiles.map(f => `${f.name}_${f.size}`));
+        const toAdd = files.filter(f => !existingKeys.has(`${f.name}_${f.size}`));
+        selectedFiles = [...selectedFiles, ...toAdd];
         renderSelectedFiles();
+        cameraInput.value = '';
       }, 50);
     });
   }
@@ -226,8 +230,11 @@
         selectedList.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Scanning folder items...</div>';
       }
       setTimeout(() => {
-        selectedFiles = files;
+        const existingKeys = new Set(selectedFiles.map(f => `${f.name}_${f.size}`));
+        const toAdd = files.filter(f => !existingKeys.has(`${f.name}_${f.size}`));
+        selectedFiles = [...selectedFiles, ...toAdd];
         renderSelectedFiles();
+        folderInput.value = '';
       }, 50);
     });
   }
@@ -240,8 +247,11 @@
         selectedList.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px;">Processing selected files...</div>';
       }
       setTimeout(() => {
-        selectedFiles = files;
+        const existingKeys = new Set(selectedFiles.map(f => `${f.name}_${f.size}`));
+        const toAdd = files.filter(f => !existingKeys.has(`${f.name}_${f.size}`));
+        selectedFiles = [...selectedFiles, ...toAdd];
         renderSelectedFiles();
+        fileInput.value = '';
       }, 50);
     });
   }
@@ -302,7 +312,10 @@
               <strong>${effectiveFiles.length} to send</strong> (~${totalMb} MB)
             </div>
           </div>
-          <button type="button" onclick="clearSelectedFiles()" style="background: rgba(234,67,53,0.15); color: #EA4335; border: 1px solid rgba(234,67,53,0.3); border-radius: 16px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 500;">Clear all</button>
+          <div style="display: flex; gap: 6px;">
+            <label for="cameraInput" style="background: rgba(26,115,232,0.15); color: #8AB4F8; border: 1px solid rgba(26,115,232,0.3); border-radius: 16px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">+ Add more</label>
+            <button type="button" onclick="clearSelectedFiles()" style="background: rgba(234,67,53,0.15); color: #EA4335; border: 1px solid rgba(234,67,53,0.3); border-radius: 16px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 500;">Clear all</button>
+          </div>
         </div>
         ${alreadyBackedUpCount > 0 ? `
           <label style="display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; color: #E8EAED; cursor: pointer; user-select: none;">
