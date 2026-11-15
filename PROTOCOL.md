@@ -125,3 +125,17 @@ sequenceDiagram
 2. **Wi-Fi SSID Filter:** Configurable setting to restrict heavy transfers only when connected to designated home/office SSIDs.
 3. **Power Management:** Automatically pauses delta index hashing when battery drops below 20% unless plugged into AC power.
 
+---
+
+## 6. Folder Lifecycle & Server Hub Routing
+
+### A. Folder Removal / Detachment Semantics
+* When a user removes a synchronized folder from Tab 2 (Backup), `P2PBridge.instance.stopWatcher(folderId)` cleanly releases native file watchers.
+* **Disk Safety Guarantee:** Local files and directories are **never** deleted from disk when unlinking a folder.
+* Paired nodes treat folder detachment as a clean peer unbind; tombstones are **not** broadcast, ensuring other devices also keep their copies intact.
+
+### B. 24/7 Server Hub & Custom Destination
+* When a device operates as a 24/7 Backup Server (Tab 3), it accepts incoming WebDrop uploads and continuous backup streams.
+* Incoming payloads are routed to the user's custom `_receiveDestination` path (e.g., `/storage/emulated/0/Download/P2Pme` or a custom user-created directory), rather than an immutable root folder.
+* Hub credentials (IP socket, 6-digit PIN, master secret key, and dynamic QR code) allow authorized devices to pair across LAN and WAN.
+

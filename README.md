@@ -13,11 +13,11 @@
 
 ## Overview
 
-**P2Pme** is a high-performance, decentralized data replication and drop engine. It combines two core workflows in a single, kid-friendly system:
+**P2Pme** is a high-performance, decentralized data replication and drop engine. It combines two core workflows in a streamlined 3-tab experience:
 
-1. **Persistent Automatic Sync:** Continuous two-way synchronization, automated camera roll backups, and Storage-Saver Archive Mode across Windows, Mac, Linux, and Android.
-2. **Nearby Wi-Fi 1-Tap Pairing:** Discovers phones and PCs on the same Wi-Fi network instantly without scanning QR codes on monitors or typing tickets.
-3. **One-Time Ephemeral Quick Drop:** Single-use, direct device-to-device transfers using 6-digit PIN codes or dynamic QR codes. Drops self-destruct immediately upon receipt without persistent directory tracking.
+1. **🚀 Transfer Tab:** One-time, direct device-to-device transfers. Send camera photos or any files to nearby devices discovered automatically on your Wi-Fi network with 1-tap, or generate a 6-digit PIN and zero-install WebDrop link to send anywhere over the internet.
+2. **🔄 Backup Tab:** Continuous, Resilio-style background folder synchronization and Camera Roll auto-backup with Storage-Saver Archive Mode. Supports adding preset folders (Camera Roll, WhatsApp) or any custom folder, viewing file counts and sync speeds, sharing folder QR tickets, and safely removing folders from sync.
+3. **🖥️ Server Tab:** Turn any phone, PC, Mac, or NAS into a dedicated 24/7 backup hub and receiver. Customize where received files and backups are stored, view real-time LAN socket addresses, display master pairing QR codes, and monitor battery optimization.
 4. **Portable Windows Desktop App:** Zero installation required. Simply download, extract, and launch `p2pme_app.exe` (or `Launch_P2Pme.cmd`) for full desktop GUI and background replication.
 5. **Zero-Install WebDrop & PWA:** Built-in local upload portal and standalone Cloudflare Pages Web PWA. Any iPhone, iPad, PC, or guest can send/receive files over Wi-Fi simply by opening the web app—**zero app installation required** and **auto-updates on every launch**.
 
@@ -25,22 +25,23 @@
 
 ## Key Features
 
-### 📸 1. One-Time Secure Quick Drop
-* **6-Digit PIN & Dynamic QR Code:** Share a simple 6-digit PIN or let nearby devices scan the on-screen QR code.
-* **Brute-Force Self-Destruct Lockout:** 3 incorrect PIN attempts automatically wipes the in-memory session.
-* **Instant Self-Destruction:** Session and ephemeral cryptographic secrets vanish the moment files are downloaded.
-* **10-Minute TTL:** Unclaimed drop sessions automatically expire.
+### 🚀 1. Transfer Tab: Instant 1-Time Transfer (LAN & Internet)
+* **Nearby Wi-Fi 1-Tap Beam:** Automatically discovers active devices on your local network. Tap any nearby device to send files directly over full-speed Wi-Fi without typing pins or scanning codes.
+* **Smart Adapter Filtering & Subnet Sweep:** Filters out virtual VPN/tunnel adapters (WireGuard, AdGuard, OpenVPN) to probe real physical network interfaces, with manual "Add by IP" fallback.
+* **6-Digit PIN & WebDrop Over Internet:** Send to any device worldwide with a 6-digit PIN code or zero-install browser link (`https://p2pme.pages.dev`).
+* **Self-Destructing Ephemeral Security:** 3 incorrect PIN attempts wipe the session instantly; sessions automatically expire in 10 minutes.
 
-### 🔄 2. Persistent Auto-Sync Folders
-* **Two-Way Synchronization:** Real-time delta replication using content-addressed BLAKE3 block chunking.
-* **1-Tap Camera Backup:** Backs up `/DCIM/Camera` in Read-Only mode to your PC, NAS, or hard drive.
-* **Storage-Saver Archive Mode:** Deleting photos/files on your phone to free up space does **not** delete them from your backup node.
-* **Android 24/7 Foreground Service:** Keeps sync active when the phone screen is locked or the app is minimized, with 0% battery usage when toggled OFF.
+### 🔄 2. Backup Tab: Continuous Resilio-Style Sync
+* **1-Tap Camera Roll Auto-Backup:** Automatically tracks and replicates your photos/videos directly to your computer or backup server in full original quality.
+* **Storage-Saver Archive Mode:** Free up storage on your phone by deleting local photos—synced copies on your PC/server remain safe and untouched.
+* **Folder Management & Instant Deletion:** Easily add folders (Camera Roll, WhatsApp Media, or any custom folder) and remove them from sync with 1 tap without losing local files.
+* **Folder QR & Ticket Sharing:** View and share pairing tickets or QR codes for any synced folder to pair directly with Windows (`p2pme join <ticket>`) or another phone.
 
-### 🌐 3. Zero-Install WebDrop & Cloudflare Pages PWA
-* **iPhone & Guest Friendly:** Friends and family on iOS can point their native camera at your screen's QR code to send or receive files directly in Safari.
-* **128-Bit Ephemeral Security Token:** Protects your local Wi-Fi receiver against LAN port scanning and unauthorized uploads (`403 Forbidden` on untrusted requests).
-* **Installable PWA:** Tap Safari **Share &rarr; Add to Home Screen** on iOS or Android to install P2Pme as a standalone web app with zero app store downloads.
+### 🖥️ 3. Server Tab: 24/7 Backup Hub & Receiver
+* **Turn Any Device into a Server:** Toggle 24/7 Backup Server mode to accept incoming drops and continuous backups with background keep-alive.
+* **Custom Save Destination Folder:** Choose exactly where received files and folder backups land on disk (e.g. internal storage, external SD card, or desktop path).
+* **Direct Server Ticket & QR Code:** Connect new client devices to your hub using a master server pairing code or direct LAN socket (`http://<ip>:45455`).
+* **Battery Optimization Management:** Visual indicator and 1-tap shortcut to disable OS battery throttling on Android for uninterrupted background replication.
 
 ---
 

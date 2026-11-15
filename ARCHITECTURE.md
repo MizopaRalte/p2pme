@@ -10,17 +10,20 @@
 
 ```mermaid
 flowchart TD
-    subgraph UI_Layer ["Surface Layer (Desktop & Mobile)"]
-        CLI["P2Pme CLI / Daemon (Windows / macOS / Linux)"]
-        AndroidUI["P2Pme Android App (Kotlin + Compose Multiplatform)"]
-        FGS["Android Foreground Service (Keep-Alive & Scoped Storage)"]
-        AndroidUI --> FGS
+    subgraph UI_Layer ["Surface Layer (Flutter Mobile & Desktop Shell)"]
+        Tab1["🚀 Transfer Tab\n(1-Time Nearby Beam & Internet PIN Drop)"]
+        Tab2["🔄 Backup Tab\n(Resilio-Style Continuous Sync & Folder Watchers)"]
+        Tab3["🖥️ Server Tab\n(24/7 Dedicated Hub & Custom Destination Picker)"]
+        FGS["Android Foreground Service (Keep-Alive & Battery Whitelist)"]
+        Tab2 --> FGS
+        Tab3 --> FGS
     end
 
     subgraph FFI_Bridge ["FFI & Binding Layer"]
-        UniFFI["UniFFI / JNI Native Bindings"]
+        UniFFI["UniFFI / Dart FFI Native Bindings"]
+        CLI["P2Pme CLI Daemon (p2pme.exe)"]
+        UI_Layer --> UniFFI
         CLI --> Core
-        FGS --> UniFFI
         UniFFI --> Core
     end
 
@@ -30,7 +33,7 @@ flowchart TD
         subgraph Net_Stack ["Network & Transport Engine"]
             QUIC["QUIC Protocol (UDP)"]
             MagicSock["Endpoint Switcher (MagicSocket)"]
-            mDNS["Local Discovery (mDNS & UDP Beacons)"]
+            mDNS["Local Discovery (mDNS & Subnet Probe)"]
             STUN["STUN & UDP Hole-Puncher"]
             DERP["Zero-Knowledge Encrypted Relay Client"]
             
