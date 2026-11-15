@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'services/p2p_bridge.dart';
+import 'services/camera_backup_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -331,7 +332,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     SyncFolderItem(
       id: 'photos-sync',
       name: 'Camera & Photos',
-      localPath: '/storage/emulated/0/DCIM/Camera',
+      localPath: Platform.isIOS ? 'Apple Photo Library' : '/storage/emulated/0/DCIM/Camera',
       status: 'Live Sync Active',
       connectionTier: 'DIRECT LAN',
       syncMode: 'ARCHIVE (STORAGE SAVER)',
@@ -436,8 +437,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 5;
-  String _currentVersionName = '1.0.4';
+  int _currentVersionCode = 6;
+  String _currentVersionName = '1.0.5';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -505,7 +506,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final notes = json['release_notes']?.toString();
         final targetUrl = Platform.isWindows
             ? (json['windows_url']?.toString() ?? 'https://p2pme.pages.dev/downloads/P2Pme-Windows.zip')
-            : (json['apk_url']?.toString() ?? 'https://p2pme.pages.dev/downloads/P2Pme.apk');
+            : (Platform.isIOS
+                ? (json['ipa_url']?.toString() ?? 'https://p2pme.pages.dev/downloads/P2Pme.ipa')
+                : (json['apk_url']?.toString() ?? 'https://p2pme.pages.dev/downloads/P2Pme.apk'));
 
         if (mounted) {
           final wasAvailable = _updateAvailable;
@@ -572,6 +575,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     try {
       final url = _updateDownloadUrl!;
+      if (Platform.isIOS) {
+        setState(() {
+          _isDownloadingUpdate = false;
+        });
+        final altStoreUrl = 'altstore://install?url=${Uri.encodeComponent(url)}';
+        final opened = await CameraBackupService.instance.openUrl(altStoreUrl);
+        if (!opened) {
+          await CameraBackupService.instance.openUrl(url);
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Opening AltStore to complete the P2Pme update...'),
+              backgroundColor: GooglePhotosColors.blue,
+            ),
+          );
+        }
+        return;
+      }
+
       if (Platform.isAndroid) {
         bool canInstall = true;
         try {
@@ -723,6 +746,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _checkBackgroundServiceStatus();
     _startWebDropServer();
     _startNearbyBeacon();
+    CameraBackupService.instance.onNewAssetsDetected = () {
+      if (mounted) {
+        setState(() {});
+        _triggerAutoCameraBackup();
+      }
+    };
+    CameraBackupService.instance.scanCameraRoll().then((_) {
+      if (mounted) setState(() {});
+    });
     _checkForAppUpdates();
     _startPeriodicUpdateChecks();
   }
@@ -818,6 +850,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _nearbyPeers[idx] = peer;
             } else {
               _nearbyPeers.add(peer);
+              _triggerAutoCameraBackup();
             }
           });
         }
@@ -873,6 +906,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           _nearbyPeers[idx] = peer;
                         } else {
                           _nearbyPeers.add(peer);
+                          _triggerAutoCameraBackup();
                         }
                       });
                     }
@@ -943,6 +977,91 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not reach ${peer.name}: $e')),
       );
+    }
+  }
+
+  bool _isAutoBackingUp = false;
+
+  Future<void> _triggerAutoCameraBackup() async {
+    if (_isAutoBackingUp) return;
+    if (_nearbyPeers.isEmpty) return;
+    final pending = CameraBackupService.instance.pendingAssetsCount;
+    if (pending == 0) return;
+
+    _isAutoBackingUp = true;
+    try {
+      final targetPeer = _nearbyPeers.firstWhere(
+        (p) => p.deviceType.toLowerCase() == 'android' || p.name.toLowerCase().contains('oneplus') || p.deviceType.toLowerCase() == 'pc',
+        orElse: () => _nearbyPeers.first,
+      );
+
+      final token = _hubSecretKey ?? _webDropSessionToken;
+      final transferred = await CameraBackupService.instance.syncPendingToPeer(
+        peerIp: targetPeer.ip,
+        peerPort: targetPeer.port,
+        token: token,
+      );
+
+      if (transferred > 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✓ Automatically backed up $transferred new photo(s) to ${targetPeer.name}!'),
+            backgroundColor: GooglePhotosColors.green,
+          ),
+        );
+      }
+    } catch (_) {
+    } finally {
+      _isAutoBackingUp = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _syncCameraRollToConnectedPeer() async {
+    if (_nearbyPeers.isEmpty) {
+      await _scanNearby();
+    }
+
+    if (_nearbyPeers.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No backup server found on Wi-Fi yet. Make sure your Android server / PC has P2Pme running.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    final targetPeer = _nearbyPeers.firstWhere(
+      (p) => p.deviceType.toLowerCase() == 'android' || p.name.toLowerCase().contains('oneplus') || p.deviceType.toLowerCase() == 'pc',
+      orElse: () => _nearbyPeers.first,
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Backing up camera roll to ${targetPeer.name} (${targetPeer.ip})...')),
+      );
+    }
+
+    final token = _hubSecretKey ?? _webDropSessionToken;
+    final transferred = await CameraBackupService.instance.syncPendingToPeer(
+      peerIp: targetPeer.ip,
+      peerPort: targetPeer.port,
+      token: token,
+      onProgress: (cur, tot, filename) {
+        if (mounted) setState(() {});
+      },
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✓ Successfully backed up $transferred photo(s) to ${targetPeer.name}!'),
+          backgroundColor: GooglePhotosColors.green,
+        ),
+      );
+      setState(() {});
     }
   }
 
@@ -3118,6 +3237,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       children: [
+        _buildCameraRollAutoBackupCard(),
         _buildBackgroundAndSpeedCard(),
         const SizedBox(height: 14),
         Row(
@@ -3137,6 +3257,157 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         const SizedBox(height: 6),
         ..._folders.map((folder) => _buildFolderCard(folder)),
       ],
+    );
+  }
+
+  Widget _buildCameraRollAutoBackupCard() {
+    final service = CameraBackupService.instance;
+    final isSyncing = service.state == CameraBackupState.syncing;
+    final isUpToDate = service.state == CameraBackupState.upToDate && service.pendingAssetsCount == 0;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.only(bottom: 14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: isUpToDate
+              ? Colors.green.shade400
+              : GooglePhotosColors.blue.withValues(alpha: 0.5),
+          width: 1.5,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF174EA6) : GooglePhotosColors.blueSurface,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.photo_library_rounded,
+                    color: GooglePhotosColors.blue,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            Platform.isIOS ? 'iPhone Camera Roll' : 'Camera Photos & Videos',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isUpToDate ? Colors.green.shade50 : Colors.blue.shade50,
+                              border: Border.all(
+                                color: isUpToDate ? Colors.green.shade400 : Colors.blue.shade400,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              isSyncing
+                                  ? 'SYNCING...'
+                                  : (isUpToDate ? 'UP TO DATE' : '${service.pendingAssetsCount} NEW'),
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: isUpToDate ? Colors.green.shade800 : Colors.blue.shade800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        isSyncing && service.currentSyncingFilename != null
+                            ? 'Sending ${service.currentSyncIndex} of ${service.pendingAssetsCount}: ${service.currentSyncingFilename}'
+                            : (service.totalDeviceAssets > 0
+                                ? '${service.totalDeviceAssets} photos on device • ${service.pendingAssetsCount} pending backup'
+                                : 'One-way automatic camera backup to server.'),
+                        style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF282A2D) : const Color(0xFFF1F3F4),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.shield_outlined, size: 14, color: GooglePhotosColors.green),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'One-way protection: photos remain safe on your server even if deleted on phone.',
+                      style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: GooglePhotosColors.blue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    onPressed: isSyncing ? null : _syncCameraRollToConnectedPeer,
+                    icon: isSyncing
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.sync_rounded, size: 16),
+                    label: Text(
+                      isSyncing
+                          ? 'Backing up...'
+                          : (service.pendingAssetsCount > 0
+                              ? 'Backup New (${service.pendingAssetsCount})'
+                              : 'Sync Camera Roll'),
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                  ),
+                  onPressed: () async {
+                    await service.scanCameraRoll();
+                    if (mounted) setState(() {});
+                  },
+                  icon: const Icon(Icons.refresh_rounded, size: 16),
+                  label: const Text('Refresh', style: TextStyle(fontSize: 13)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -4120,7 +4391,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ==========================================
   Future<void> _openCameraBackupPicker() async {
     List<File> cameraFiles = [];
-    if (Platform.isAndroid) {
+    int iosTotal = 0;
+    int iosPending = 0;
+
+    if (Platform.isIOS) {
+      final permitted = await CameraBackupService.instance.checkPermission();
+      if (!permitted) {
+        final granted = await CameraBackupService.instance.requestPermission();
+        if (!granted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please allow access to Photos in iOS Settings to enable camera backup.')),
+          );
+          return;
+        }
+      }
+      await CameraBackupService.instance.scanCameraRoll();
+      iosTotal = CameraBackupService.instance.totalDeviceAssets;
+      iosPending = CameraBackupService.instance.pendingAssetsCount;
+    } else if (Platform.isAndroid) {
       final pathsToTry = [
         '/storage/emulated/0/DCIM/Camera',
         '/storage/emulated/0/DCIM/100ANDRO',
@@ -4210,7 +4498,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Camera',
+                            Platform.isIOS ? 'iPhone Camera Roll' : 'Camera',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w600,
@@ -4220,9 +4508,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             ),
                           ),
                           Text(
-                            cameraFiles.isNotEmpty
-                                ? '${cameraFiles.length} photos on device'
-                                : (Platform.isAndroid ? 'Camera folder (/DCIM)' : 'Camera roll'),
+                            Platform.isIOS
+                                ? '$iosTotal photos on iPhone • $iosPending pending backup'
+                                : (cameraFiles.isNotEmpty
+                                    ? '${cameraFiles.length} photos on device'
+                                    : 'Camera folder (/DCIM)'),
                             style: TextStyle(
                               fontSize: 12,
                               color: Theme.of(context).brightness == Brightness.dark
@@ -4236,7 +4526,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ],
                 ),
                 const SizedBox(height: 16),
-                if (cameraFiles.isNotEmpty) ...[
+                if (Platform.isIOS) ...[
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: GooglePhotosColors.blue,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                    ),
+                    icon: const Icon(Icons.sync_rounded, size: 18),
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        iosPending > 0
+                            ? 'Backup New Photos ($iosPending) to Server'
+                            : 'Camera Roll Up to Date',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _syncCameraRollToConnectedPeer();
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ] else if (cameraFiles.isNotEmpty) ...[
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
                       backgroundColor: GooglePhotosColors.blue,
@@ -4311,7 +4625,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   icon: const Icon(Icons.grid_view_rounded, size: 18),
                   label: const FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text('Choose from gallery', style: TextStyle(fontWeight: FontWeight.w500)),
+                    child: Text('Choose specific photos from gallery', style: TextStyle(fontWeight: FontWeight.w500)),
                   ),
                   onPressed: () async {
                     Navigator.pop(ctx);
@@ -4345,40 +4659,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   label: const FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      'Back up to computer',
+                      'Back up to server / computer',
                       style: TextStyle(fontWeight: FontWeight.w600),
                     ),
                   ),
                   onPressed: () {
                     Navigator.pop(ctx);
-                    final path = Platform.isAndroid
-                        ? '/storage/emulated/0/DCIM/Camera'
-                        : 'C:\\Photos';
-                    final ticket = P2PBridge.instance.shareFolder(
-                      path,
-                      'Camera Backup',
-                      syncMode: 2,
-                    );
-                    if (ticket != null) {
-                      setState(() {
-                        _folders.add(SyncFolderItem(
-                          id: 'cam-${DateTime.now().millisecondsSinceEpoch}',
-                          name: 'Camera Backup',
-                          localPath: path,
-                          status: 'Backup Active',
-                          connectionTier: 'DIRECT LAN',
-                          syncMode: 'ARCHIVE (STORAGE SAVER)',
-                          fileCount: cameraFiles.isNotEmpty ? cameraFiles.length : 1,
-                          totalSizeMb: 120.0,
-                          speedMb: 85.0,
-                          ticket: ticket,
-                        ));
-                        _selectedIndex = 2;
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Backup turned on')),
-                      );
-                    }
+                    _syncCameraRollToConnectedPeer();
                   },
                 ),
               ],
