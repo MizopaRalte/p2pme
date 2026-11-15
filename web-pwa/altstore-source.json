@@ -12,14 +12,26 @@
       "iconURL": "https://p2pme.pages.dev/icon-512.png",
       "tintColor": "1A73E8",
       "category": "utilities",
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+          "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+          "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+        }
+      },
       "permissions": [
         {
           "type": "photos",
-          "usageDescription": "Allows automatic camera roll backup directly to your private home storage."
+          "usageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server."
+        },
+        {
+          "type": "photos-add",
+          "usageDescription": "P2Pme needs permission to save received photos and videos to your photo library."
         },
         {
           "type": "local-network",
-          "usageDescription": "Discovers nearby P2Pme receivers and 24/7 home servers on your Wi-Fi network."
+          "usageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
         }
       ],
       "beta": false,
@@ -31,7 +43,15 @@
           "localizedDescription": "Resilio-style Camera Roll continuous auto-backup on iOS, native PhotoKit integration, official Google Photos-themed iOS app icon, and 1-tap AltStore in-app update.",
           "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.0.5.ipa",
           "size": 7401965,
-          "minOSVersion": "14.0"
+          "minOSVersion": "14.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
         }
       ]
     }
