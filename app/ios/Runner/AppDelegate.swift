@@ -16,8 +16,8 @@ import Photos
     PHPhotoLibrary.shared().register(self)
     
     // Fallback channel initialization if needed
-    if cameraRollChannel == nil, let controller = window?.rootViewController as? FlutterBinaryMessenger {
-      setupCameraRollChannel(binaryMessenger: controller)
+    if cameraRollChannel == nil, let controller = window?.rootViewController as? FlutterViewController {
+      setupCameraRollChannel(binaryMessenger: controller.binaryMessenger)
     }
     
     return result
@@ -26,8 +26,9 @@ import Photos
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     
-    let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "P2PmeCameraRoll")
-    setupCameraRollChannel(binaryMessenger: registrar.messenger())
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "P2PmeCameraRoll") {
+      setupCameraRollChannel(binaryMessenger: registrar.messenger())
+    }
   }
 
   private func setupCameraRollChannel(binaryMessenger: FlutterBinaryMessenger) {
@@ -95,8 +96,10 @@ import Photos
           result(false)
           return
         }
-        UIApplication.shared.open(url, options: [:]) { success in
-          result(success)
+        DispatchQueue.main.async {
+          UIApplication.shared.open(url, options: [:]) { success in
+            result(success)
+          }
         }
       default:
         result(FlutterMethodNotImplemented)

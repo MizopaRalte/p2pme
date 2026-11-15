@@ -27,6 +27,13 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
+	<!-- URL schemes for 1-Tap AltStore updates -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>altstore</string>
+		<string>sidestore</string>
+	</array>
+
 	<!-- Permissions for Background Camera Roll Backup & P2P LAN -->
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>P2Pme needs access to your photos to automatically back up your camera roll to your home server.</string>
