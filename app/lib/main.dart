@@ -512,7 +512,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
         if (mounted) {
           final wasAvailable = _updateAvailable;
-          final isNowAvailable = (remoteCode > _currentVersionCode);
+          final remoteCodeNorm = remoteCode >= 1000 ? (remoteCode % 1000) : remoteCode;
+          final currentCodeNorm = _currentVersionCode >= 1000 ? (_currentVersionCode % 1000) : _currentVersionCode;
+          final isNowAvailable = (remoteCodeNorm > currentCodeNorm);
           setState(() {
             _latestVersionName = remoteName;
             _updateReleaseNotes = notes;
