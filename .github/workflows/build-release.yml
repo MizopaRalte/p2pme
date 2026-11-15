@@ -39,8 +39,7 @@ jobs:
           cd app/build/ios/iphoneos
           mkdir -p Payload
           cp -r Runner.app Payload/
-          zip -r -q P2Pme.ipa Payload
-          mv P2Pme.ipa ../../../../P2Pme.ipa
+          zip -r -q "$GITHUB_WORKSPACE/P2Pme.ipa" Payload
 
       - name: Upload iOS IPA Artifact
         uses: actions/upload-artifact@v4
@@ -80,7 +79,7 @@ jobs:
 
       - name: Copy arm64 APK
         run: |
-          cp app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk P2Pme.apk
+          cp app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$GITHUB_WORKSPACE/P2Pme.apk"
 
       - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
