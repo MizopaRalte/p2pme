@@ -949,10 +949,13 @@
       <input type="text" id="modalHubName" value="Home Android Hub" placeholder="e.g. Home Android Phone" style="width: 100%; box-sizing: border-box; background: #202124; border: 1px solid var(--card-border); color: white; padding: 10px 14px; border-radius: 12px; font-size: 14px; margin-bottom: 14px;">
 
       <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--text);">IP Address or Remote Domain</label>
-      <div style="display: flex; gap: 8px; margin-bottom: 18px;">
+      <div style="display: flex; gap: 8px; margin-bottom: 14px;">
         <input type="text" id="modalHubHost" value="192.168.178.35" placeholder="192.168.1.50 or home.duckdns.org" style="flex: 1; min-width: 0; background: #202124; border: 1px solid var(--card-border); color: white; padding: 10px 12px; border-radius: 12px; font-size: 14px; font-family: monospace;">
         <input type="text" id="modalHubPort" value="45455" placeholder="45455" style="width: 72px; background: #202124; border: 1px solid var(--card-border); color: white; padding: 10px 6px; border-radius: 12px; font-size: 14px; font-family: monospace; text-align: center;">
       </div>
+
+      <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--text);">Hub Pairing Token <span style="font-weight: 400; color: var(--text-muted); font-size: 11px;">(Optional for 24/7 Security)</span></label>
+      <input type="password" id="modalHubToken" placeholder="Paste 256-bit token from receiver" style="width: 100%; box-sizing: border-box; background: #202124; border: 1px solid var(--card-border); color: white; padding: 10px 14px; border-radius: 12px; font-size: 13px; font-family: monospace; margin-bottom: 18px;">
 
       <div style="display: flex; gap: 10px; justify-content: flex-end;">
         <button onclick="hideAddHubModal()" class="header-nav-btn" style="background: transparent; border: 1px solid var(--card-border); border-radius: 20px; padding: 8px 18px; cursor: pointer;">Cancel</button>

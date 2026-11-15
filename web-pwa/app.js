@@ -651,6 +651,7 @@
   const modalHubName = document.getElementById('modalHubName');
   const modalHubHost = document.getElementById('modalHubHost');
   const modalHubPort = document.getElementById('modalHubPort');
+  const modalHubToken = document.getElementById('modalHubToken');
 
   function getSavedHubs() {
     try {
@@ -761,6 +762,7 @@
     const name = modalHubName ? modalHubName.value.trim() : 'Home Android Hub';
     const host = modalHubHost ? modalHubHost.value.trim() : '192.168.178.35';
     const port = modalHubPort ? parseInt(modalHubPort.value.trim()) || 45455 : 45455;
+    const token = modalHubToken ? modalHubToken.value.trim() : '';
 
     if (!host) {
       alert('Please enter a valid IP address or domain');
@@ -773,6 +775,7 @@
       name: name || 'Home Android Hub',
       host: host,
       port: port,
+      token: token,
       addedAt: Date.now()
     };
     hubs.unshift(newHub);
