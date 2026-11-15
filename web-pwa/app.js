@@ -797,39 +797,30 @@
   };
 
   window.switchInfoTab = function(idx) {
-    const btn1 = document.getElementById('infoTabBtn1');
-    const btn2 = document.getElementById('infoTabBtn2');
-    const btn3 = document.getElementById('infoTabBtn3');
-    const btn4 = document.getElementById('infoTabBtn4');
-    const c1 = document.getElementById('infoTabContent1');
-    const c2 = document.getElementById('infoTabContent2');
-    const c3 = document.getElementById('infoTabContent3');
-    const c4 = document.getElementById('infoTabContent4');
-
-    [btn1, btn2, btn3, btn4].forEach(b => {
-      if (b) {
-        b.style.background = 'transparent';
-        b.style.color = 'var(--text-muted)';
-        b.style.fontWeight = '600';
+    const tabs = [1, 2, 3, 4, 5];
+    tabs.forEach(t => {
+      const btn = document.getElementById('infoTabBtn' + t);
+      const content = document.getElementById('infoTabContent' + t);
+      if (btn) {
+        btn.style.background = 'transparent';
+        btn.style.color = 'var(--text-muted)';
+        btn.style.fontWeight = '600';
       }
-    });
-    [c1, c2, c3, c4].forEach(c => {
-      if (c) c.style.display = 'none';
+      if (content) content.style.display = 'none';
     });
 
-    if (idx === 1) {
-      if (btn1) { btn1.style.background = '#1A73E8'; btn1.style.color = 'white'; btn1.style.fontWeight = '700'; }
-      if (c1) c1.style.display = 'block';
-    } else if (idx === 2) {
-      if (btn2) { btn2.style.background = '#34A853'; btn2.style.color = 'white'; btn2.style.fontWeight = '700'; }
-      if (c2) c2.style.display = 'block';
-    } else if (idx === 3) {
-      if (btn3) { btn3.style.background = '#5F6368'; btn3.style.color = 'white'; btn3.style.fontWeight = '700'; }
-      if (c3) c3.style.display = 'block';
-    } else if (idx === 4) {
-      if (btn4) { btn4.style.background = '#EA4335'; btn4.style.color = 'white'; btn4.style.fontWeight = '700'; }
-      if (c4) c4.style.display = 'block';
+    const activeBtn = document.getElementById('infoTabBtn' + idx);
+    const activeContent = document.getElementById('infoTabContent' + idx);
+    if (activeBtn) {
+      if (idx === 1) activeBtn.style.background = '#1A73E8';
+      else if (idx === 2) activeBtn.style.background = '#34A853';
+      else if (idx === 3) activeBtn.style.background = '#0284C7';
+      else if (idx === 4) activeBtn.style.background = '#EA4335';
+      else if (idx === 5) activeBtn.style.background = '#5F6368';
+      activeBtn.style.color = 'white';
+      activeBtn.style.fontWeight = '700';
     }
+    if (activeContent) activeContent.style.display = 'block';
   };
 
   // iOS Sideloading & 7-Day Auto-Refresh Modal Handlers

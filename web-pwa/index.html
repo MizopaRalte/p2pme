@@ -976,38 +976,62 @@
       </div>
 
       <!-- Segmented Tabs for Methods -->
-      <div style="display: flex; gap: 6px; background: #202124; padding: 4px; border-radius: 16px; margin-bottom: 16px;">
-        <button id="infoTabBtn1" onclick="switchInfoTab(1)" style="flex: 1; padding: 8px 6px; font-size: 11px; font-weight: 700; border-radius: 12px; border: none; cursor: pointer; background: #1A73E8; color: white; display: flex; align-items: center; justify-content: center; gap: 5px;">
-          <span>🌐</span> WebRTC P2P
+      <div style="display: flex; gap: 4px; background: #202124; padding: 4px; border-radius: 16px; margin-bottom: 16px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
+        <button id="infoTabBtn1" onclick="switchInfoTab(1)" style="flex: 1; min-width: 95px; padding: 8px 4px; font-size: 11px; font-weight: 700; border-radius: 12px; border: none; cursor: pointer; background: #1A73E8; color: white; display: flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap;">
+          <span>🏠</span> Setup Server
         </button>
-        <button id="infoTabBtn2" onclick="switchInfoTab(2)" style="flex: 1; padding: 8px 6px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 5px;">
+        <button id="infoTabBtn2" onclick="switchInfoTab(2)" style="flex: 1; min-width: 95px; padding: 8px 4px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap;">
           <span>🔒</span> Private Mesh
         </button>
-        <button id="infoTabBtn3" onclick="switchInfoTab(3)" style="flex: 1; padding: 8px 6px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 5px;">
+        <button id="infoTabBtn3" onclick="switchInfoTab(3)" style="flex: 1; min-width: 95px; padding: 8px 4px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap;">
+          <span>🌐</span> WebRTC P2P
+        </button>
+        <button id="infoTabBtn4" onclick="switchInfoTab(4)" style="flex: 1; min-width: 95px; padding: 8px 4px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap;">
+          <span>🔌</span> Ports & IPs
+        </button>
+        <button id="infoTabBtn5" onclick="switchInfoTab(5)" style="flex: 1; min-width: 90px; padding: 8px 4px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap;">
           <!-- Official Apple Logo SVG -->
           <svg viewBox="0 0 170 170" width="13" height="13" fill="currentColor">
             <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.04-7.6-7.85-11.7-14.42-6.01-9.59-10.74-20.47-14.19-32.65-3.46-12.17-5.19-23.76-5.19-34.76 0-14.92 3.65-27.24 10.95-36.96 7.3-9.72 16.59-14.69 27.87-14.92 4.13 0 9.04 1.15 14.73 3.46 5.69 2.31 9.38 3.52 11.08 3.63 1.37-.11 5.3-1.43 11.8-3.95 6.49-2.52 11.75-3.69 15.77-3.52 11.53.64 21.05 4.96 28.56 12.96-10.23 6.19-15.24 14.8-15.03 25.82.21 8.54 3.46 15.77 9.75 21.7 6.29 5.92 13.68 9.38 22.18 10.37-2.13 6.41-4.89 13.25-8.28 20.52zM119.22 33.15c0-7.3 2.66-14.28 7.97-20.93 5.31-6.65 11.96-10.74 19.95-12.27.43 1.09.65 2.18.65 3.27 0 7.2-2.73 14.24-8.19 21.13-5.46 6.88-12.22 10.92-20.28 12.13-.07-1.1-.1-2.2-.1-3.33z"/>
           </svg>
           Apple iOS
         </button>
-        <button id="infoTabBtn4" onclick="switchInfoTab(4)" style="flex: 1; padding: 8px 6px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 5px;">
-          <span>🔌</span> Ports & IPs
-        </button>
       </div>
 
-      <!-- TAB 1: WebRTC Direct -->
+      <!-- TAB 1: Setup 24/7 Receiver Server Securely -->
       <div id="infoTabContent1">
         <div style="background: rgba(26, 115, 232, 0.1); border: 1px solid rgba(26, 115, 232, 0.3); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
-          <div style="font-size: 13px; font-weight: 700; color: #8AB4F8; margin-bottom: 4px;">🚀 Zero-Install Direct P2P</div>
+          <div style="font-size: 13px; font-weight: 700; color: #8AB4F8; margin-bottom: 4px;">🏠 Turn Any Phone or PC into a 24/7 Receiver Server</div>
           <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
-            Uses Google STUN (<code>stun.l.google.com:19302</code>) to punch through home router firewalls directly in Safari and Chrome. No VPN or port forwarding needed.
+            Use a spare Android phone, Android TV, or Windows PC as a permanent private backup station. Photos stream straight to your home storage with <strong>zero cloud custody</strong>.
           </div>
         </div>
-        <ol style="font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0; padding-left: 18px;">
-          <li>Keep your Home Android Phone plugged in and connected to your home Wi-Fi with P2Pme running.</li>
-          <li>Save the Hub with your home IP address or remote hostname.</li>
-          <li>When you are outside on 5G or foreign Wi-Fi, tap <strong>Send to Home Hub</strong>. P2Pme establishes a direct encrypted WebRTC DataChannel to deliver your photos.</li>
-        </ol>
+        <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+          <div style="margin-bottom: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px;">
+            <div style="font-weight: 700; color: #E8EAED; margin-bottom: 4px;">Step 1: Keep It Powered & Awake (Zero Sleep)</div>
+            <div>• <strong>Android:</strong> Plug phone into a wall charger. Go to <em>Android Settings &rarr; Apps &rarr; P2Pme &rarr; Battery &rarr; Select "Unrestricted"</em> (prevents Android from killing background tasks). In P2Pme, toggle <strong>"Keep Awake / 24/7 Hub Mode"</strong> ON.</div>
+            <div>• <strong>Windows PC:</strong> Open Windows Settings &rarr; <em>System &rarr; Power & Sleep</em> &rarr; set Sleep to <strong>Never</strong> when plugged in.</div>
+          </div>
+
+          <div style="margin-bottom: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px;">
+            <div style="font-weight: 700; color: #E8EAED; margin-bottom: 4px;">Step 2: Reserve a Static Local IP (Home Wi-Fi)</div>
+            <div>To ensure your phone/PC never changes its IP address when the router reboots:</div>
+            <div>Open your home router admin page (e.g. <code>192.168.1.1</code>) &rarr; <em>DHCP Settings</em> &rarr; click <strong>Add DHCP Reservation</strong> for your receiver device (e.g. assign fixed <code>192.168.1.50</code>).</div>
+          </div>
+
+          <div style="margin-bottom: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px;">
+            <div style="font-weight: 700; color: #E8EAED; margin-bottom: 4px;">Step 3: Security & Hub Pairing Token (Required)</div>
+            <div>Every P2Pme server generates a <strong>256-bit cryptographically unique Hub Pairing Token</strong>:</div>
+            <div>On your receiver device, tap <strong>"Copy Hub Token"</strong> (or scan QR code). Enter this token when saving the Hub on your sending devices. All unauthorized connection attempts without this secret token are <strong>instantly dropped</strong>.</div>
+          </div>
+
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px;">
+            <div style="font-weight: 700; color: #E8EAED; margin-bottom: 4px;">Step 4: Connect Outside Your Home (Zero Open Ports)</div>
+            <div><strong>Never forward port 45455 openly to the public internet!</strong> Instead, use:</div>
+            <div>• <strong>Tailscale (Recommended):</strong> Free WireGuard mesh that connects your devices directly with <strong>0 open router ports</strong>.</div>
+            <div>• <strong>WebRTC Direct:</strong> Encrypted browser-to-server DataChannels with automatic NAT hole punching.</div>
+          </div>
+        </div>
       </div>
 
       <!-- TAB 2: Private Mesh (Tailscale) -->
@@ -1026,22 +1050,19 @@
         </ol>
       </div>
 
-      <!-- TAB 3: Apple iOS Native -->
+      <!-- TAB 3: WebRTC Direct -->
       <div id="infoTabContent3" style="display: none;">
-        <div style="background: rgba(255, 255, 255, 0.08); border: 1px solid var(--card-border); border-radius: 14px; padding: 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
-          <svg viewBox="0 0 170 170" width="24" height="24" fill="#FFFFFF">
-            <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.04-7.6-7.85-11.7-14.42-6.01-9.59-10.74-20.47-14.19-32.65-3.46-12.17-5.19-23.76-5.19-34.76 0-14.92 3.65-27.24 10.95-36.96 7.3-9.72 16.59-14.69 27.87-14.92 4.13 0 9.04 1.15 14.73 3.46 5.69 2.31 9.38 3.52 11.08 3.63 1.37-.11 5.3-1.43 11.8-3.95 6.49-2.52 11.75-3.69 15.77-3.52 11.53.64 21.05 4.96 28.56 12.96-10.23 6.19-15.24 14.8-15.03 25.82.21 8.54 3.46 15.77 9.75 21.7 6.29 5.92 13.68 9.38 22.18 10.37-2.13 6.41-4.89 13.25-8.28 20.52zM119.22 33.15c0-7.3 2.66-14.28 7.97-20.93 5.31-6.65 11.96-10.74 19.95-12.27.43 1.09.65 2.18.65 3.27 0 7.2-2.73 14.24-8.19 21.13-5.46 6.88-12.22 10.92-20.28 12.13-.07-1.1-.1-2.2-.1-3.33z"/>
-          </svg>
-          <div>
-            <div style="font-size: 13px; font-weight: 700; color: #FFFFFF;">Apple iOS Camera Roll Sync</div>
-            <div style="font-size: 11px; color: var(--text-muted);">BackgroundTasks & PhotoKit Integration</div>
+        <div style="background: rgba(2, 132, 199, 0.1); border: 1px solid rgba(2, 132, 199, 0.3); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 700; color: #38BDF8; margin-bottom: 4px;">🚀 Zero-Install Direct P2P</div>
+          <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
+            Uses Google STUN (<code>stun.l.google.com:19302</code>) to punch through home router firewalls directly in Safari and Chrome. No VPN or port forwarding needed.
           </div>
         </div>
-        <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
-          <p style="margin: 0 0 8px 0;"><strong>Web PWA (Current):</strong> Tap Safari Share &rarr; <em>Add to Home Screen</em>. Instant zero-install access with 1-tap backup.</p>
-          <p style="margin: 0 0 8px 0;"><strong>Native iOS App (Configured):</strong> Supports automated background camera roll backup whenever you take new photos, using native iOS background processing.</p>
-          <p style="margin: 0;"><button onclick="hideHubInfoModal(); showIosSideloadModal();" style="background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: #8AB4F8; border-radius: 12px; padding: 5px 12px; font-size: 11px; font-weight: 600; cursor: pointer;">📲 Open iOS Sideload & 7-Day Guide &rarr;</button></p>
-        </div>
+        <ol style="font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0; padding-left: 18px;">
+          <li>Keep your Home Android Phone plugged in and connected to your home Wi-Fi with P2Pme running.</li>
+          <li>Save the Hub with your home IP address or remote hostname.</li>
+          <li>When you are outside on 5G or foreign Wi-Fi, tap <strong>Send to Home Hub</strong>. P2Pme establishes a direct encrypted WebRTC DataChannel to deliver your photos.</li>
+        </ol>
       </div>
 
       <!-- TAB 4: Ports & IP Explained -->
@@ -1069,6 +1090,24 @@
             <strong style="color: #E8EAED;">4. Want Zero Port Hassle?</strong><br>
             Use <strong>WebRTC Direct</strong> (browser-to-browser NAT hole punching) or <strong>Tailscale Mesh</strong>. Both assign unique cryptographic peer IDs and require <strong>zero router port forwarding</strong>.
           </p>
+        </div>
+      </div>
+
+      <!-- TAB 5: Apple iOS Native -->
+      <div id="infoTabContent5" style="display: none;">
+        <div style="background: rgba(255, 255, 255, 0.08); border: 1px solid var(--card-border); border-radius: 14px; padding: 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+          <svg viewBox="0 0 170 170" width="24" height="24" fill="#FFFFFF">
+            <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.04-7.6-7.85-11.7-14.42-6.01-9.59-10.74-20.47-14.19-32.65-3.46-12.17-5.19-23.76-5.19-34.76 0-14.92 3.65-27.24 10.95-36.96 7.3-9.72 16.59-14.69 27.87-14.92 4.13 0 9.04 1.15 14.73 3.46 5.69 2.31 9.38 3.52 11.08 3.63 1.37-.11 5.3-1.43 11.8-3.95 6.49-2.52 11.75-3.69 15.77-3.52 11.53.64 21.05 4.96 28.56 12.96-10.23 6.19-15.24 14.8-15.03 25.82.21 8.54 3.46 15.77 9.75 21.7 6.29 5.92 13.68 9.38 22.18 10.37-2.13 6.41-4.89 13.25-8.28 20.52zM119.22 33.15c0-7.3 2.66-14.28 7.97-20.93 5.31-6.65 11.96-10.74 19.95-12.27.43 1.09.65 2.18.65 3.27 0 7.2-2.73 14.24-8.19 21.13-5.46 6.88-12.22 10.92-20.28 12.13-.07-1.1-.1-2.2-.1-3.33z"/>
+          </svg>
+          <div>
+            <div style="font-size: 13px; font-weight: 700; color: #FFFFFF;">Apple iOS Camera Roll Sync</div>
+            <div style="font-size: 11px; color: var(--text-muted);">BackgroundTasks & PhotoKit Integration</div>
+          </div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+          <p style="margin: 0 0 8px 0;"><strong>Web PWA (Current):</strong> Tap Safari Share &rarr; <em>Add to Home Screen</em>. Instant zero-install access with 1-tap backup.</p>
+          <p style="margin: 0 0 8px 0;"><strong>Native iOS App (Configured):</strong> Supports automated background camera roll backup whenever you take new photos, using native iOS background processing.</p>
+          <p style="margin: 0;"><button onclick="hideHubInfoModal(); showIosSideloadModal();" style="background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: #8AB4F8; border-radius: 12px; padding: 5px 12px; font-size: 11px; font-weight: 600; cursor: pointer;">📲 Open iOS Sideload & 7-Day Guide &rarr;</button></p>
         </div>
       </div>
 
