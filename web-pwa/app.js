@@ -897,6 +897,16 @@
       return;
     }
 
+    // Smart deduplication: filter out already backed up photos if option is enabled
+    const ledger = getBackupLedger();
+    let toSend = selectedFiles;
+    if (skipAlreadyBackedUp) {
+      const filtered = selectedFiles.filter(f => !ledger[`${f.name}_${f.size}`]);
+      if (filtered.length > 0) {
+        toSend = filtered;
+      }
+    }
+
     await acquireWakeLock();
 
     if (sendProgressCont) sendProgressCont.classList.remove('hidden');
@@ -905,57 +915,84 @@
     }
 
     let successCount = 0;
-    const totalFiles = selectedFiles.length;
+    const totalFiles = toSend.length;
     const uploadUrlBase = `http://${hub.host}:${hub.port}/upload`;
+    const hubToken = hub.token || localStorage.getItem('p2pme_hub_token') || '';
 
+    // Smart sequential pipeline: feeds 1 file at a time to prevent browser memory exhaustion
     for (let i = 0; i < totalFiles; i++) {
-      const file = selectedFiles[i];
-      const pct = Math.round(((i) / totalFiles) * 100);
+      const file = toSend[i];
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      const overallPct = Math.round((i / totalFiles) * 100);
+
       if (sendProgressBar) {
-        sendProgressBar.style.width = `${Math.max(5, pct)}%`;
-        sendProgressBar.innerText = `Sending ${i + 1}/${totalFiles}: ${file.name} (${pct}%)`;
+        sendProgressBar.style.width = `${Math.max(5, overallPct)}%`;
+        sendProgressBar.innerText = `[${i + 1}/${totalFiles}] ${file.name} (${mb} MB) • ${overallPct}%`;
+      }
+      if (sendStatus) {
+        sendStatus.innerHTML = `<span style="color:#8AB4F8;">Feeding ${i + 1} of ${totalFiles}: <strong>${escapeHtml(file.name)}</strong> (${mb} MB)...</span>`;
       }
 
-      try {
-        const hubToken = hub.token || localStorage.getItem('p2pme_hub_token') || '';
-        const uploadUrl = `${uploadUrlBase}?name=${encodeURIComponent(file.name)}&token=${encodeURIComponent(hubToken)}`;
-        const res = await fetch(uploadUrl, {
-          method: 'POST',
-          body: file,
-          mode: 'cors',
-          headers: {
-            'Content-Type': file.type || 'application/octet-stream',
-            'x-p2pme-token': hubToken
+      let fileSuccess = false;
+      let lastErr = null;
+
+      // Smart retry: up to 2 attempts per file on transient network blip
+      for (let attempt = 1; attempt <= 2 && !fileSuccess; attempt++) {
+        try {
+          const uploadUrl = `${uploadUrlBase}?name=${encodeURIComponent(file.name)}&token=${encodeURIComponent(hubToken)}`;
+          const res = await fetch(uploadUrl, {
+            method: 'POST',
+            body: file,
+            mode: 'cors',
+            headers: {
+              'Content-Type': file.type || 'application/octet-stream',
+              'x-p2pme-token': hubToken
+            }
+          });
+
+          if (res.ok) {
+            fileSuccess = true;
+            successCount++;
+          } else {
+            throw new Error(`Server returned HTTP ${res.status}`);
           }
-        });
-
-        if (res.ok) {
-          successCount++;
-        } else {
-          throw new Error(`Server returned status ${res.status}`);
+        } catch (err) {
+          lastErr = err;
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 400));
+          }
         }
-      } catch (err) {
-        console.warn(`Direct fetch to ${uploadUrlBase} failed, offering direct portal link:`, err);
-        if (sendProgressBar) {
-          sendProgressBar.style.width = '100%';
-          sendProgressBar.innerText = 'Direct LAN Portal Available';
-        }
-        if (sendStatus) {
-          sendStatus.innerHTML = `
-            <div style="background:rgba(26,115,232,0.12);border:1px solid rgba(26,115,232,0.3);border-radius:14px;padding:14px;text-align:left;margin-top:10px;">
-              <div style="font-weight:600;color:#8AB4F8;margin-bottom:6px;">🚀 Direct Local Transfer:</div>
-              <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
-                Browser HTTPS security policy: To stream files directly over Wi-Fi without cloud servers, tap to open the local portal on your phone:
-              </div>
-              <a href="http://${hub.host}:${hub.port}/" target="_blank" style="display:inline-block;background:var(--google-blue);color:white;padding:8px 18px;border-radius:20px;text-decoration:none;font-size:13px;font-weight:600;">
-                Open ${escapeHtml(hub.name)} Direct Portal &rarr;
-              </a>
-            </div>
-          `;
-        }
-        releaseWakeLock();
-        return;
       }
+
+      if (!fileSuccess) {
+        console.warn(`Direct fetch to ${uploadUrlBase} failed on item ${i + 1}:`, lastErr);
+
+        // If the first file failed completely, likely HTTPS Mixed-Content or unreachable host
+        if (i === 0) {
+          if (sendProgressBar) {
+            sendProgressBar.style.width = '100%';
+            sendProgressBar.innerText = 'Direct LAN Portal Available';
+          }
+          if (sendStatus) {
+            sendStatus.innerHTML = `
+              <div style="background:rgba(26,115,232,0.12);border:1px solid rgba(26,115,232,0.3);border-radius:14px;padding:14px;text-align:left;margin-top:10px;">
+                <div style="font-weight:600;color:#8AB4F8;margin-bottom:6px;">🚀 Direct Local Transfer:</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+                  Browser HTTPS security policy: To stream files directly over Wi-Fi without cloud servers, tap to open the local portal on your receiver phone:
+                </div>
+                <a href="http://${hub.host}:${hub.port}/" target="_blank" style="display:inline-block;background:var(--google-blue);color:white;padding:8px 18px;border-radius:20px;text-decoration:none;font-size:13px;font-weight:600;">
+                  Open ${escapeHtml(hub.name)} Direct Portal &rarr;
+                </a>
+              </div>
+            `;
+          }
+          releaseWakeLock();
+          return;
+        }
+      }
+
+      // Memory safety: short yield allows browser Garbage Collector and socket buffers to flush
+      await new Promise(r => setTimeout(r, 80));
     }
 
     if (sendProgressBar) {
@@ -966,7 +1003,7 @@
     if (sendStatus) {
       sendStatus.innerHTML = `
         <span style="color:#34A853;font-weight:700;font-size:14px;">
-          ✓ Successfully delivered ${successCount} photo(s) to ${escapeHtml(hub.name)}!
+          ✓ Successfully delivered ${successCount} of ${totalFiles} item(s) to ${escapeHtml(hub.name)}!
         </span><br>
         <span style="font-size:12px;color:var(--text-muted);">
           Saved directly into Android gallery without cloud storage custody.
@@ -974,7 +1011,7 @@
       `;
     }
 
-    markFilesBackedUp(selectedFiles);
+    markFilesBackedUp(toSend.slice(0, successCount));
     releaseWakeLock();
     selectedFiles = [];
     renderSelectedFiles();
