@@ -635,6 +635,9 @@
     </nav>
 
     <div class="header-right">
+      <button onclick="showHubInfoModal()" title="Help & Guides" class="header-nav-btn" style="background: rgba(255, 255, 255, 0.08); color: #E8EAED; border: 1px solid var(--card-border); border-radius: 20px; font-size: 11px; padding: 4px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+        <span style="font-weight: bold;">ⓘ</span> Help
+      </button>
       <div class="status-badge" style="background: rgba(52, 168, 83, 0.15); color: #34A853; border-color: rgba(52, 168, 83, 0.3);">
         <div class="status-dot" style="background: #34A853;"></div>
         DIRECT LAN
@@ -987,6 +990,9 @@
           </svg>
           Apple iOS
         </button>
+        <button id="infoTabBtn4" onclick="switchInfoTab(4)" style="flex: 1; padding: 8px 6px; font-size: 11px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 5px;">
+          <span>🔌</span> Ports & IPs
+        </button>
       </div>
 
       <!-- TAB 1: WebRTC Direct -->
@@ -1033,7 +1039,36 @@
         </div>
         <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
           <p style="margin: 0 0 8px 0;"><strong>Web PWA (Current):</strong> Tap Safari Share &rarr; <em>Add to Home Screen</em>. Instant zero-install access with 1-tap backup.</p>
-          <p style="margin: 0;"><strong>Native iOS App (Configured):</strong> Supports automated background camera roll backup whenever you take new photos, using native iOS background processing.</p>
+          <p style="margin: 0 0 8px 0;"><strong>Native iOS App (Configured):</strong> Supports automated background camera roll backup whenever you take new photos, using native iOS background processing.</p>
+          <p style="margin: 0;"><button onclick="hideHubInfoModal(); showIosSideloadModal();" style="background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: #8AB4F8; border-radius: 12px; padding: 5px 12px; font-size: 11px; font-weight: 600; cursor: pointer;">📲 Open iOS Sideload & 7-Day Guide &rarr;</button></p>
+        </div>
+      </div>
+
+      <!-- TAB 4: Ports & IP Explained -->
+      <div id="infoTabContent4" style="display: none;">
+        <div style="background: rgba(234, 67, 53, 0.1); border: 1px solid rgba(234, 67, 53, 0.3); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 700; color: #F28B82; margin-bottom: 4px;">🔌 How Ports & Remote Connections Work</div>
+          <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
+            Why multiple users can use the same port without colliding, and how private pairing tokens keep you 100% secure.
+          </div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+          <p style="margin: 0 0 10px 0;">
+            <strong style="color: #E8EAED;">1. The "House & Door" Principle:</strong><br>
+            Think of an <strong>IP Address</strong> as a street address (e.g. <code>192.168.1.50</code> or <code>100.85.120.44</code>), and the <strong>Port</strong> (<code>45455</code>) as a specific apartment door inside that building. Even if 1,000,000 users use port 45455, they live in completely different "houses" (different IP addresses), so they will <strong>never collide or mix up</strong>.
+          </p>
+          <p style="margin: 0 0 10px 0;">
+            <strong style="color: #E8EAED;">2. Two Servers in the Same Home?</strong><br>
+            If you run two P2Pme servers inside your home (e.g. an Android phone and a Windows PC), your router automatically gives each one a different local IP address (<code>192.168.1.50:45455</code> and <code>192.168.1.55:45455</code>). Devices on your Wi-Fi reach them independently. If forwarding through a router, you can assign custom external ports (e.g. 45455 for Phone 1, 45456 for PC).
+          </p>
+          <p style="margin: 0 0 10px 0;">
+            <strong style="color: #E8EAED;">3. 256-Bit Security Pairing Tokens:</strong><br>
+            Every P2Pme receiver generates a cryptographically unique secret token. Even if someone scans your IP and discovers port 45455, all incoming requests without your secret token are <strong>instantly dropped</strong>.
+          </p>
+          <p style="margin: 0;">
+            <strong style="color: #E8EAED;">4. Want Zero Port Hassle?</strong><br>
+            Use <strong>WebRTC Direct</strong> (browser-to-browser NAT hole punching) or <strong>Tailscale Mesh</strong>. Both assign unique cryptographic peer IDs and require <strong>zero router port forwarding</strong>.
+          </p>
         </div>
       </div>
 
@@ -1105,17 +1140,51 @@
         <div style="background: rgba(2, 132, 199, 0.1); border: 1px solid rgba(2, 132, 199, 0.3); border-radius: 14px; padding: 12px; margin-bottom: 12px;">
           <div style="font-size: 13px; font-weight: 700; color: #38BDF8; margin-bottom: 4px;">📲 100% Computer-Free On-Device Refresh</div>
           <div style="font-size: 12px; color: #E8EAED; line-height: 1.4;">
-            SideStore is a fork of AltStore that runs an internal WireGuard loopback VPN directly on your iPhone. It re-signs and refreshes apps on any Wi-Fi <strong>without ever needing a computer again</strong>.
+            SideStore runs an internal WireGuard loopback VPN directly on your iPhone. Once configured, it refreshes P2Pme over <strong>any Wi-Fi without ever needing a computer again</strong>.
           </div>
         </div>
-        <ol style="font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0; padding-left: 18px;">
-          <li>Install SideStore onto your device once (<a href="https://sidestore.io" target="_blank" style="color: #38BDF8;">sidestore.io</a>).</li>
-          <li>Ensure SideStore's local WireGuard VPN is turned ON in Settings.</li>
-          <li>Tap <strong>Install with SideStore</strong> below. SideStore downloads, signs, and refreshes P2Pme autonomously!</li>
-        </ol>
-        <div style="margin-top: 12px;">
-          <a href="sidestore://install?url=https%3A%2F%2Fp2pme.pages.dev%2Fdownloads%2FP2Pme.ipa" class="action-btn" style="display: block; margin: 0; padding: 8px 12px; font-size: 11px; border-radius: 14px; text-align: center; text-decoration: none;">
+
+        <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+          <div style="margin-bottom: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px;">
+            <div style="font-weight: 700; color: #E8EAED; margin-bottom: 4px;">Step 1: Install WireGuard on your iPhone</div>
+            <div>Install the official WireGuard VPN app from the App Store (free):</div>
+            <div style="margin-top: 6px;">
+              <a href="https://apps.apple.com/app/wireguard/id1451685025" target="_blank" style="color: #38BDF8; font-weight: 600; text-decoration: underline;">
+                🔗 Download WireGuard on App Store &rarr;
+              </a>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px;">
+            <div style="font-weight: 700; color: #E8EAED; margin-bottom: 4px;">Step 2: 1-Click Install via PC (One-Time Only)</div>
+            <div>Connect iPhone to PC via USB, unlock phone and tap <em>Trust</em>. On your PC, run in terminal:</div>
+            <div style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 6px 10px; font-family: monospace; font-size: 11px; color: #A8C7FA; margin: 6px 0; user-select: all;">
+              winget install -e --id nabdev.iloader
+            </div>
+            <div>Open <strong>iloader</strong> on PC, select your iPhone, sign in with your Apple ID, and click <em>Install SideStore</em> (iloader auto-generates and places the pairing file for you!).</div>
+            <div style="font-size: 11px; color: #9AA0A6; margin-top: 4px;">
+              Or with AltServer: hold Shift &rarr; Install IPA... &rarr; select <a href="https://github.com/SideStore/SideStore/releases/download/0.7.0-alpha/SideStore.ipa" target="_blank" style="color: #38BDF8;">SideStore.ipa</a>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px;">
+            <div style="font-weight: 700; color: #E8EAED; margin-bottom: 4px;">Step 3: Enable On-Device VPN</div>
+            <div>On iPhone, go to <em>Settings &rarr; General &rarr; VPN & Device Management</em> &rarr; tap your Apple ID &rarr; tap <strong>Trust</strong>.</div>
+            <div>Open <strong>WireGuard</strong> and toggle the VPN switch to <strong>ON</strong>. Open <strong>SideStore</strong> and sign in.</div>
+          </div>
+
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px;">
+            <div style="font-weight: 700; color: #E8EAED; margin-bottom: 4px;">Step 4: Install P2Pme & Disconnect PC Forever</div>
+            <div>Tap <strong>Open in SideStore</strong> below. SideStore signs and installs P2Pme. You can now unplug and turn off your PC! SideStore auto-refreshes P2Pme over any Wi-Fi.</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 14px; display: flex; gap: 8px;">
+          <a href="sidestore://install?url=https%3A%2F%2Fp2pme.pages.dev%2Fdownloads%2FP2Pme.ipa" class="action-btn" style="flex: 2; margin: 0; padding: 10px 14px; font-size: 12px; border-radius: 14px; text-align: center; text-decoration: none; background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%);">
             📲 Open in SideStore
+          </a>
+          <a href="https://sidestore.io" target="_blank" class="action-btn" style="flex: 1; margin: 0; padding: 10px 12px; font-size: 11px; border-radius: 14px; background: #303134; border: 1px solid var(--card-border); text-align: center; text-decoration: none; color: #38BDF8;">
+            SideStore.io &rarr;
           </a>
         </div>
       </div>
