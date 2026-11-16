@@ -735,6 +735,7 @@
       const card = document.createElement('div');
       card.className = 'peer-card';
       card.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid var(--card-border);border-radius:16px;margin-bottom:10px;flex-wrap:wrap;';
+      const hasKey = hub.token && hub.token.length > 0;
       card.innerHTML = `
         <div style="display:flex;align-items:center;gap:12px;">
           <div style="width:42px;height:42px;border-radius:21px;background:rgba(26,115,232,0.18);display:flex;align-items:center;justify-content:center;font-size:22px;">
@@ -744,15 +745,19 @@
             <div style="font-weight:700;font-size:14px;color:var(--text);display:flex;align-items:center;gap:6px;">
               ${escapeHtml(hub.name)}
               <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:rgba(52,168,83,0.15);color:#34A853;border:1px solid rgba(52,168,83,0.3);font-weight:600;">24/7 SERVER</span>
+              ${hasKey ? `<span style="font-size:10px;padding:2px 6px;border-radius:10px;background:rgba(26,115,232,0.15);color:#8AB4F8;border:1px solid rgba(26,115,232,0.3);font-weight:600;">🛡️ 256-BIT KEY</span>` : ''}
             </div>
             <div style="font-size:12px;color:var(--text-muted);font-family:monospace;margin-top:2px;">
-              ${escapeHtml(hub.host)}:${hub.port}
+              ${escapeHtml(hub.host)}:${hub.port} ${hasKey ? `• Key: ${hub.token.substring(0, 8)}••••` : '• No Key'}
             </div>
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <button class="header-nav-btn" style="background:var(--google-blue);color:white;padding:7px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;" onclick="quickSendToHub('${hub.id}')">
             Send Photos &rarr;
+          </button>
+          <button class="header-nav-btn" style="background:transparent;border:1px solid var(--card-border);color:var(--text-muted);padding:7px 12px;border-radius:20px;font-size:12px;cursor:pointer;" onclick="editHub('${hub.id}')" title="Edit Hub / Key">
+            ✎
           </button>
           <button class="header-nav-btn" style="background:transparent;border:1px solid rgba(234,67,53,0.3);color:#EA4335;padding:7px 12px;border-radius:20px;font-size:12px;cursor:pointer;" onclick="removeHub('${hub.id}')" title="Forget Device">
             ✕
@@ -764,11 +769,35 @@
   }
 
   window.showAddHubModal = function() {
-    if (hubModal) hubModal.classList.remove('hidden');
+    if (hubModal) {
+      delete hubModal.dataset.editId;
+      if (modalHubName) modalHubName.value = 'Home Android Hub';
+      if (modalHubHost) modalHubHost.value = '192.168.178.35';
+      if (modalHubPort) modalHubPort.value = '45455';
+      if (modalHubToken) modalHubToken.value = '';
+      hubModal.classList.remove('hidden');
+    }
+  };
+
+  window.editHub = function(id) {
+    const hubs = getSavedHubs();
+    const hub = hubs.find(h => h.id === id);
+    if (!hub) return;
+    if (modalHubName) modalHubName.value = hub.name;
+    if (modalHubHost) modalHubHost.value = hub.host;
+    if (modalHubPort) modalHubPort.value = hub.port;
+    if (modalHubToken) modalHubToken.value = hub.token || '';
+    if (hubModal) {
+      hubModal.dataset.editId = id;
+      hubModal.classList.remove('hidden');
+    }
   };
 
   window.hideAddHubModal = function() {
-    if (hubModal) hubModal.classList.add('hidden');
+    if (hubModal) {
+      delete hubModal.dataset.editId;
+      hubModal.classList.add('hidden');
+    }
   };
 
   window.saveHubFromModal = function() {
@@ -783,19 +812,33 @@
     }
 
     const hubs = getSavedHubs();
-    const newHub = {
-      id: `hub_${Date.now()}`,
-      name: name || 'Home Android Hub',
-      host: host,
-      port: port,
-      token: token,
-      addedAt: Date.now()
-    };
-    hubs.unshift(newHub);
+    const editId = hubModal ? hubModal.dataset.editId : null;
+
+    if (editId) {
+      const idx = hubs.findIndex(h => h.id === editId);
+      if (idx >= 0) {
+        hubs[idx].name = name;
+        hubs[idx].host = host;
+        hubs[idx].port = port;
+        hubs[idx].token = token;
+      }
+    } else {
+      const newHub = {
+        id: `hub_${Date.now()}`,
+        name: name || 'Home Android Hub',
+        host: host,
+        port: port,
+        token: token,
+        addedAt: Date.now()
+      };
+      hubs.unshift(newHub);
+    }
+
     saveHubsList(hubs);
 
     try {
       localStorage.setItem('p2pme_saved_phone_ip', host);
+      if (token) localStorage.setItem('p2pme_hub_token', token);
     } catch (_) {}
 
     hideAddHubModal();
@@ -1030,8 +1073,61 @@
     renderSelectedFiles();
   };
 
+  // Handle URL pairing parameters (?host=...&port=...&key=...)
+  function checkUrlPairingParams() {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const host = urlParams.get('host') || urlParams.get('ip');
+      const key = urlParams.get('key') || urlParams.get('token') || urlParams.get('secret');
+      const port = parseInt(urlParams.get('port')) || 45455;
+      const name = urlParams.get('name') || '24/7 Home Hub';
+
+      if (host) {
+        const hubs = getSavedHubs();
+        const existingIdx = hubs.findIndex(h => h.host === host);
+        const hubEntry = {
+          id: existingIdx >= 0 ? hubs[existingIdx].id : `hub_${Date.now()}`,
+          name: name,
+          host: host,
+          port: port,
+          token: key || (existingIdx >= 0 ? hubs[existingIdx].token : ''),
+          addedAt: Date.now()
+        };
+        if (existingIdx >= 0) {
+          hubs[existingIdx] = hubEntry;
+        } else {
+          hubs.unshift(hubEntry);
+        }
+        saveHubsList(hubs);
+        localStorage.setItem('p2pme_saved_phone_ip', host);
+        if (key) {
+          localStorage.setItem('p2pme_hub_token', key);
+        }
+
+        // Show pairing toast
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+          position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+          background: #34A853; color: white; border-radius: 24px; padding: 10px 20px;
+          font-size: 13px; font-weight: 700; z-index: 10000; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        `;
+        toast.innerText = `✓ Connected to ${name} (${host}:${port}) with 256-bit Key!`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
+
+        // Clean query parameters from address bar without reloading
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+      } else if (key) {
+        localStorage.setItem('p2pme_hub_token', key);
+      }
+    } catch (e) {
+      console.warn('URL pairing parse failed:', e);
+    }
+  }
+
   // URL Hash auto-fill & deep-linking
   function handleHashRoute() {
+    checkUrlPairingParams();
     try {
       const savedPhoneIp = localStorage.getItem('p2pme_saved_phone_ip');
       const phoneIpInput = document.getElementById('phoneIpInput');

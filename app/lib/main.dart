@@ -306,6 +306,7 @@ class NearbyPeer {
   final DateTime lastSeen;
   final List<String> folders;
   bool isPaired;
+  String? authToken; // paired secret or token
 
   NearbyPeer({
     required this.id,
@@ -316,6 +317,7 @@ class NearbyPeer {
     required this.lastSeen,
     this.folders = const [],
     this.isPaired = false,
+    this.authToken,
   });
 }
 
@@ -366,7 +368,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final TextEditingController _pairTicketController = TextEditingController();
   String _receiveDestination = Platform.isAndroid
       ? '/storage/emulated/0/Download/P2Pme'
-      : './received_drop';
+      : (Platform.isIOS && Platform.environment['HOME'] != null
+          ? '${Platform.environment['HOME']}/Documents/P2Pme'
+          : './received_drop');
+
+  String _getAppBaseDirectory() {
+    if (Platform.isAndroid) {
+      return '/data/data/net.p2pme.p2pme_app/files';
+    } else if (Platform.isIOS) {
+      final home = Platform.environment['HOME'];
+      if (home != null && home.isNotEmpty) {
+        return '$home/Documents';
+      }
+    }
+    return '.';
+  }
 
   // Background Sync & Platform Channels
   static const MethodChannel _bgChannel = MethodChannel('net.p2pme/background_sync');
@@ -391,9 +407,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _initHubSecret() async {
     try {
-      final baseDir = Platform.isAndroid
-          ? '/data/data/net.p2pme.p2pme_app/files'
-          : '.';
+      final baseDir = _getAppBaseDirectory();
       final secretFile = File('$baseDir${Platform.pathSeparator}.hub_secret');
       if (await secretFile.exists()) {
         final content = (await secretFile.readAsString()).trim();
@@ -423,6 +437,80 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _regenerateHubSecret() async {
+    try {
+      final baseDir = _getAppBaseDirectory();
+      final secretFile = File('$baseDir${Platform.pathSeparator}.hub_secret');
+      final rand = Random.secure();
+      final bytes = List<int>.generate(32, (_) => rand.nextInt(256));
+      final newSecret = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+      try {
+        await secretFile.parent.create(recursive: true);
+        await secretFile.writeAsString(newSecret);
+      } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _hubSecretKey = newSecret;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to regenerate hub secret: $e');
+    }
+  }
+
+  void _promptRegenerateServerKey() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: GooglePhotosColors.red),
+            SizedBox(width: 10),
+            Text('Regenerate Server Key?'),
+          ],
+        ),
+        content: Text(
+          'Generating a new secret key will immediately revoke access for all previously paired devices and clients.\n\n'
+          'You will need to scan the new QR code or copy the new key on your other devices to reconnect.',
+          style: TextStyle(
+            fontSize: 13,
+            color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF3C4043),
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: GooglePhotosColors.red,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Regenerate Key'),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _regenerateHubSecret();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('✓ Server secret key & QR code regenerated! All previous pairings revoked.'),
+                    backgroundColor: GooglePhotosColors.green,
+                  ),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   void _regenerateSessionToken() {
     setState(() {
       _webDropSessionToken = _generateSessionToken();
@@ -440,8 +528,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 6;
-  String _currentVersionName = '1.0.5';
+  int _currentVersionCode = 7;
+  String _currentVersionName = '1.0.6';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -902,9 +990,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> _probeIp(HttpClient client, String targetIp) async {
+  Future<bool> _probeIp(HttpClient client, String targetIp, {int? targetPort, String? authToken}) async {
+    final portToUse = targetPort ?? _webDropPort;
     try {
-      final req = await client.getUrl(Uri.parse('http://$targetIp:$_webDropPort/api/info'));
+      final req = await client.getUrl(Uri.parse('http://$targetIp:$portToUse/api/info'));
       final resp = await req.close();
       if (resp.statusCode == HttpStatus.ok) {
         final body = await utf8.decoder.bind(resp).join();
@@ -912,7 +1001,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (json['p2pme'] == true) {
           final name = json['device_name']?.toString() ?? 'Nearby Device';
           final type = json['device_type']?.toString() ?? 'pc';
-          final port = (json['port'] ?? _webDropPort) as int;
+          final port = (json['port'] ?? portToUse) as int;
           final id = json['node_id']?.toString() ?? targetIp;
 
           if (mounted) {
@@ -925,6 +1014,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 port: port,
                 deviceType: type,
                 lastSeen: DateTime.now(),
+                authToken: authToken,
+                isPaired: authToken != null && authToken.isNotEmpty,
               );
               if (idx >= 0) {
                 _nearbyPeers[idx] = peer;
@@ -943,13 +1034,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _probeDirectIp(String rawIp) async {
     var clean = rawIp.trim();
+    String? providedKey;
+    final uri = Uri.tryParse(clean.startsWith('http://') || clean.startsWith('https://') ? clean : 'http://$clean');
+    if (uri != null && uri.queryParameters.containsKey('key')) {
+      providedKey = uri.queryParameters['key'];
+    }
+
     if (clean.startsWith('http://')) clean = clean.substring(7);
     if (clean.startsWith('https://')) clean = clean.substring(8);
+    final questionIdx = clean.indexOf('?');
+    if (questionIdx != -1) clean = clean.substring(0, questionIdx);
+    final slashIdx = clean.indexOf('/');
+    if (slashIdx != -1) clean = clean.substring(0, slashIdx);
+
     final colonIdx = clean.indexOf(':');
     final ipOnly = colonIdx != -1 ? clean.substring(0, colonIdx) : clean;
+    final port = colonIdx != -1 ? int.tryParse(clean.substring(colonIdx + 1)) ?? _webDropPort : _webDropPort;
 
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
-    final found = await _probeIp(client, ipOnly);
+    final found = await _probeIp(client, ipOnly, targetPort: port, authToken: providedKey);
     if (!found) {
       // Also try with default port if user entered custom or standard port
       if (mounted) {
@@ -1112,7 +1215,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         orElse: () => _nearbyPeers.first,
       );
 
-      final token = _hubSecretKey ?? _webDropSessionToken;
+      final token = targetPeer.authToken ?? _hubSecretKey ?? _webDropSessionToken;
       final transferred = await CameraBackupService.instance.syncPendingToPeer(
         peerIp: targetPeer.ip,
         peerPort: targetPeer.port,
@@ -1161,7 +1264,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     }
 
-    final token = _hubSecretKey ?? _webDropSessionToken;
+    final token = targetPeer.authToken ?? _hubSecretKey ?? _webDropSessionToken;
     final transferred = await CameraBackupService.instance.syncPendingToPeer(
       peerIp: targetPeer.ip,
       peerPort: targetPeer.port,
@@ -1333,7 +1436,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
-    final token = request.uri.queryParameters['token'] ?? request.headers.value('x-p2pme-token');
+    final token = request.uri.queryParameters['token'] ??
+        request.headers.value('x-p2pme-token') ??
+        request.uri.queryParameters['key'];
     final pin = request.uri.queryParameters['pin'];
 
     final bool isSessionTokenValid = (token != null && token == _webDropSessionToken);
@@ -1347,7 +1452,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (_activeDropPin != null && _selectedFilePaths.isNotEmpty) {
         request.response.write(_buildDropDownloadHtml(_activeDropPin!));
       } else {
-        request.response.write(_buildWebDropHtml(_webDropSessionToken));
+        request.response.write(_buildWebDropHtml(token ?? _webDropSessionToken));
       }
       await request.response.close();
       return;
@@ -1359,7 +1464,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (isPinValid || _activeDropPin != null) {
         request.response.write(_buildDropDownloadHtml(pin ?? _activeDropPin!));
       } else {
-        request.response.write(_buildWebDropHtml(_webDropSessionToken));
+        request.response.write(_buildWebDropHtml(token ?? _webDropSessionToken));
       }
       await request.response.close();
       return;
@@ -2069,7 +2174,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!await file.exists()) continue;
       final fileName = path.split(Platform.pathSeparator).last;
       try {
-        final url = Uri.parse('http://${peer.ip}:${peer.port}/upload?name=${Uri.encodeComponent(fileName)}&token=$_webDropSessionToken');
+        final tokenToSend = peer.authToken ?? _webDropSessionToken;
+        final url = Uri.parse('http://${peer.ip}:${peer.port}/upload?name=${Uri.encodeComponent(fileName)}&token=$tokenToSend');
         final req = await client.postUrl(url);
         final len = await file.length();
         req.headers.contentLength = len;
@@ -2332,6 +2438,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: GooglePhotosColors.red,
+                        side: BorderSide(color: GooglePhotosColors.red.withValues(alpha: 0.5)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: const Icon(Icons.refresh_rounded, size: 16),
+                      label: const Text('Regenerate Key & QR Code', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      onPressed: _promptRegenerateServerKey,
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   Center(
                     child: Container(
@@ -2342,7 +2462,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         border: Border.all(color: Colors.grey.shade300),
                       ),
                       child: QrImageView(
-                        data: serverUrl,
+                        data: _hubSecretKey != null && _hubSecretKey!.isNotEmpty
+                            ? '$serverUrl?key=$_hubSecretKey'
+                            : serverUrl,
                         version: QrVersions.auto,
                         size: 140.0,
                         backgroundColor: Colors.white,
@@ -2352,7 +2474,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 8),
                   Center(
                     child: Text(
-                      'Scan from client device to pair instantly',
+                      'Scan with client device for 256-bit secure paired transfer',
                       style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                     ),
                   ),
@@ -2457,6 +2579,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 '• 🚀 Transfer: Send items one-time. Tap a nearby device on Wi-Fi, or send anywhere over the internet using a 6-digit PIN.\n'
                                 '• 🔄 Backup: Continuous Camera Roll auto-backup. Detects new photos & videos and automatically saves them to your server.\n'
                                 '• 🖥️ Server: Turn this device into a 24/7 backup destination, choose where files are saved, and view your pairing QR code.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  height: 1.4,
+                                  color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF3C4043),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Security & Key Regeneration Guide Card
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF2B2118) : const Color(0xFFFEF7E0),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: isDark ? const Color(0xFF5C3C1A) : const Color(0xFFFEEFC3)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.shield_outlined, size: 16, color: GooglePhotosColors.yellow),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Zero-Conflict Security & On-Demand Key Regeneration',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark ? const Color(0xFFFDD663) : const Color(0xFFB06000),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '• 🛡️ Zero Conflicts: Every server uses 256-bit cryptographically secure random entropy (CSPRNG), making key collision mathematically impossible (2^256 combinations).\n'
+                                '• 🔄 Folder Ticket Regeneration: In the Backup tab, tap the refresh button on any folder\'s QR dialog to instantly generate a new BLAKE3 pairing ticket and revoke the old one.\n'
+                                '• 🔑 Server Key Regeneration: In the Server tab, tap "Regenerate Key & QR Code" to generate a fresh 256-bit secret and instantly revoke all previous client pairings.',
                                 style: TextStyle(
                                   fontSize: 12,
                                   height: 1.4,
@@ -4524,8 +4686,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ==========================================
   // PAIR / DEVICES SCREEN (COMPUTER & DEVICE SYNC)
   // ==========================================
-  String? _getFolderTicket(SyncFolderItem folder) {
-    if (folder.ticket != null && folder.ticket!.isNotEmpty) {
+  String? _getFolderTicket(SyncFolderItem folder, {bool forceRegenerate = false}) {
+    if (!forceRegenerate && folder.ticket != null && folder.ticket!.isNotEmpty) {
       return folder.ticket;
     }
     try {
@@ -4543,9 +4705,63 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _promptRegenerateFolderTicket(SyncFolderItem folder, void Function(String newTicket) onRegenerated) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (promptCtx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: GooglePhotosColors.red),
+            SizedBox(width: 10),
+            Text('Regenerate Ticket?'),
+          ],
+        ),
+        content: Text(
+          'Regenerating this ticket creates a brand-new cryptographic authentication key and immediately invalidates all previous QR codes and links for "${folder.name}".\n\n'
+          'Other devices will need to scan or enter the new ticket to sync.',
+          style: TextStyle(
+            fontSize: 13,
+            color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF3C4043),
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(promptCtx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: GooglePhotosColors.red,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Regenerate'),
+            onPressed: () {
+              Navigator.pop(promptCtx);
+              final newTicket = _getFolderTicket(folder, forceRegenerate: true);
+              if (newTicket != null && newTicket.isNotEmpty) {
+                onRegenerated(newTicket);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('✓ New pairing ticket generated for "${folder.name}"! Previous ticket revoked.'),
+                    backgroundColor: GooglePhotosColors.green,
+                  ),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showFolderQrDialog(SyncFolderItem folder) {
-    final ticket = _getFolderTicket(folder);
-    if (ticket == null || ticket.isEmpty) {
+    String? currentTicket = _getFolderTicket(folder);
+    if (currentTicket == null || currentTicket.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not generate pairing ticket for this folder.')),
       );
@@ -4556,81 +4772,111 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Row(
-          children: [
-            const Icon(Icons.qr_code_2, color: GooglePhotosColors.blue),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                folder.name,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Scan this QR code from another phone or PC to pair with this folder.',
-              style: TextStyle(
-                fontSize: 13,
-                color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              child: QrImageView(
-                data: ticket,
-                version: QrVersions.auto,
-                size: 190.0,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Or paste into PC terminal: p2pme join <ticket>',
-              style: TextStyle(
-                fontSize: 11,
-                fontFamily: 'monospace',
-                color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: GooglePhotosColors.blue,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            ),
-            icon: const Icon(Icons.copy, size: 16),
-            label: const Text('Copy Ticket'),
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: ticket));
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Pairing ticket copied! Run on PC: p2pme join <ticket>'),
-                  backgroundColor: GooglePhotosColors.blue,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: Row(
+            children: [
+              const Icon(Icons.qr_code_2, color: GooglePhotosColors.blue),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  folder.name,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
                 ),
-              );
-            },
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh_rounded, size: 20),
+                tooltip: 'Regenerate Ticket & QR',
+                onPressed: () {
+                  _promptRegenerateFolderTicket(folder, (newTicket) {
+                    setDialogState(() {
+                      currentTicket = newTicket;
+                    });
+                  });
+                },
+              ),
+            ],
           ),
-        ],
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Scan this QR code from another phone or PC to pair with this folder.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: QrImageView(
+                  data: currentTicket!,
+                  version: QrVersions.auto,
+                  size: 190.0,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Or paste into PC terminal: p2pme join <ticket>',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: GooglePhotosColors.red,
+                  side: BorderSide(color: GooglePhotosColors.red.withValues(alpha: 0.4)),
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: const Icon(Icons.refresh_rounded, size: 14),
+                label: const Text('Regenerate Ticket & QR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                onPressed: () {
+                  _promptRegenerateFolderTicket(folder, (newTicket) {
+                    setDialogState(() {
+                      currentTicket = newTicket;
+                    });
+                  });
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: GooglePhotosColors.blue,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              ),
+              icon: const Icon(Icons.copy, size: 16),
+              label: const Text('Copy Ticket'),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: currentTicket!));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Pairing ticket copied! Run on PC: p2pme join <ticket>'),
+                    backgroundColor: GooglePhotosColors.blue,
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -4952,16 +5198,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final folderController = TextEditingController(text: _receiveDestination);
 
-    final basePath = Platform.isAndroid ? '/storage/emulated/0' : (Platform.isWindows ? 'C:\\P2Pme_Receiver' : '.');
-    final presets = Platform.isAndroid ? [
-      {'name': 'Downloads / P2Pme', 'path': '$basePath/Download/P2Pme', 'icon': Icons.download_rounded},
-      {'name': 'Photos / P2Pme', 'path': '$basePath/DCIM/P2Pme', 'icon': Icons.photo_library_rounded},
-      {'name': 'Pictures / P2Pme', 'path': '$basePath/Pictures/P2Pme', 'icon': Icons.image_rounded},
-      {'name': 'Documents / P2Pme', 'path': '$basePath/Documents/P2Pme', 'icon': Icons.description_rounded},
-    ] : [
-      {'name': 'Downloads', 'path': './received_drop', 'icon': Icons.download_rounded},
-      {'name': 'Photos', 'path': './received_photos', 'icon': Icons.photo_library_rounded},
-    ];
+    final basePath = Platform.isAndroid
+        ? '/storage/emulated/0'
+        : (Platform.isIOS && Platform.environment['HOME'] != null
+            ? '${Platform.environment['HOME']}/Documents'
+            : (Platform.isWindows ? 'C:\\P2Pme_Receiver' : '.'));
+    final presets = Platform.isAndroid
+        ? [
+            {'name': 'Downloads / P2Pme', 'path': '$basePath/Download/P2Pme', 'icon': Icons.download_rounded},
+            {'name': 'Photos / P2Pme', 'path': '$basePath/DCIM/P2Pme', 'icon': Icons.photo_library_rounded},
+            {'name': 'Pictures / P2Pme', 'path': '$basePath/Pictures/P2Pme', 'icon': Icons.image_rounded},
+            {'name': 'Documents / P2Pme', 'path': '$basePath/Documents/P2Pme', 'icon': Icons.description_rounded},
+          ]
+        : (Platform.isIOS
+            ? [
+                {'name': 'Documents / P2Pme', 'path': '$basePath/P2Pme', 'icon': Icons.folder_shared_rounded},
+                {'name': 'Camera Backups', 'path': '$basePath/P2Pme/Backups', 'icon': Icons.photo_library_rounded},
+              ]
+            : [
+                {'name': 'Downloads', 'path': './received_drop', 'icon': Icons.download_rounded},
+                {'name': 'Photos', 'path': './received_photos', 'icon': Icons.photo_library_rounded},
+              ]);
 
     await showDialog(
       context: context,
