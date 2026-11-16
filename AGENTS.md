@@ -73,3 +73,4 @@ A task or release is **ONLY COMPLETE** when:
 3. `version.json` and `altstore-source.json` contain matching version strings, build numbers, file sizes, and SHA-256 checksums.
 4. All assets are deployed live to Cloudflare Pages (`https://p2pme.pages.dev`).
 5. Live endpoints have been fetched via HTTP to verify that the remote CDN serves the exact expected content without stale caching.
+6. The official Git release tag (`vX.Y.Z`) is created and pushed to GitHub (`git push origin vX.Y.Z`), and the official GitHub Release is published with all binary assets (APK, IPA, Windows zip, and SHA-256 checksums).
