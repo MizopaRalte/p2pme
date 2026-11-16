@@ -50,6 +50,7 @@ import Photos
         result(status == .authorized || status == .limited)
       case "getAssetCount":
         let fetchOptions = PHFetchOptions()
+        fetchOptions.predicate = NSPredicate(format: "(mediaSubtype & %d) == 0", PHAssetMediaSubtype.photoScreenshot.rawValue)
         let fetchResult = PHAsset.fetchAssets(with: fetchOptions)
         result(fetchResult.count)
       case "getAssets":
@@ -59,10 +60,14 @@ import Photos
         
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        var predicates: [NSPredicate] = [
+          NSPredicate(format: "(mediaSubtype & %d) == 0", PHAssetMediaSubtype.photoScreenshot.rawValue)
+        ]
         if let since = sinceTimestamp, since > 0 {
           let date = Date(timeIntervalSince1970: since / 1000.0)
-          fetchOptions.predicate = NSPredicate(format: "creationDate > %@", date as NSDate)
+          predicates.append(NSPredicate(format: "creationDate > %@", date as NSDate))
         }
+        fetchOptions.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         let fetchResult = PHAsset.fetchAssets(with: fetchOptions)
         var items: [[String: Any]] = []
         let count = (limit > 0) ? min(fetchResult.count, limit) : fetchResult.count
@@ -107,6 +112,22 @@ import Photos
           UIApplication.shared.open(url, options: [:]) { success in
             result(success)
           }
+        }
+      case "getStorageSpace":
+        let fileURL = URL(fileURLWithPath: NSHomeDirectory())
+        do {
+          let values = try fileURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey])
+          let freeBytes = values.volumeAvailableCapacityForImportantUsage ?? 0
+          let totalBytes = Int64(values.volumeTotalCapacity ?? 0)
+          result([
+            "free_bytes": freeBytes,
+            "total_bytes": totalBytes,
+          ])
+        } catch {
+          result([
+            "free_bytes": Int64(0),
+            "total_bytes": Int64(0),
+          ])
         }
       default:
         result(FlutterMethodNotImplemented)

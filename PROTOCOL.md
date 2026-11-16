@@ -225,4 +225,54 @@ Sender (Client)                                          Receiver (24/7 Hub)
 * **Batch Telemetry:** Both peers maintain synchronized batch progress in bytes and gigabytes so users know exact remaining data volume and completion percentages.
 * **Pause Abort Semantics:** When the sender taps "Pause Backup", the client issues `request.abort()` or finishes the active chunk cleanly, stopping the stream without corrupting state. In Server Mode, pause controls are restricted to the sender to prevent desynchronization.
 
+---
+
+## 9. Receiver Storage Telemetry & Out-of-Space Protocol (HTTP 507)
+
+### A. Storage Exposure in Discovery Probe (`GET /api/info`)
+Servers query native filesystem APIs (`StatFs` on Android, `resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey])` on iOS) and return real-time storage availability:
+```json
+{
+  "p2pme": true,
+  "device_name": "Pixel 7 Pro",
+  "device_type": "android",
+  "ip": "192.168.1.105",
+  "port": 45455,
+  "storage": {
+    "free_bytes": 45298483200,
+    "total_bytes": 128000000000,
+    "free_readable": "42.2 GB Free"
+  }
+}
+```
+* **Sender Pre-flight Warning:** If `batchTotalBytes > free_bytes`, the sender displays an amber alert chip warning that the receiver's disk capacity is lower than the queued batch size.
+
+### B. Out-of-Space Negotiation Sequence (`HTTP 507 Insufficient Storage`)
+When the receiver filesystem is exhausted or remaining space drops below buffer thresholds:
+```text
+Sender (Client)                                          Receiver (24/7 Hub)
+      |                                                         |
+      | --- POST /upload?name=<file>&token=<key> -------------> | (Pre-flight free space < 50 MB
+      |                                                         |  OR FileSystemException ENOSPC)
+      | <--- HTTP/1.1 507 Insufficient Storage ---------------- | (Clean up partial file)
+      |      {"error":"STORAGE_FULL","message":"..."}           | (Show UI warning banner)
+      |                                                         |
+      | (Transition to CameraBackupState.serverStorageFull)     |
+      | (Show UI: PAUSED (RECEIVER FULL))                       |
+      | (Poll GET /api/info every 5 seconds)                   |
+      | --- GET /api/info ------------------------------------> | (User taps "Free up space" in
+      | <--- 200 OK (storage.free_bytes: 42 GB) --------------- |  Google Photos on Receiver)
+      |                                                         |
+      | (Auto-Resume: re-issue POST /upload for failed file)    |
+      | --- POST /upload?name=<file>&token=<key> -------------> |
+```
+
+---
+
+## 10. Native Screenshot Filtering & Configuration Persistence
+
+* **Screenshot Exclusion:** Native PhotoKit queries enforce `(mediaSubtype & PHAssetMediaSubtype.photoScreenshot) == 0`. Android filesystem scans filter out paths and filenames matching `*screenshot*`.
+* **Permanent Storage Persistence:** All synced asset indexes (`p2pme_synced_camera_assets.json`) and configuration profiles (`.p2pme_config.json`) are stored in `$HOME/Documents/` (iOS) and `/data/data/net.p2pme.p2pme_app/files/` (Android), which are protected from OS cache purges and survive app updates.
+
+
 

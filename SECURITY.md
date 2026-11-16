@@ -77,6 +77,14 @@
   * **Strict Key Authentication:** WAN requests require the identical 256-bit server token (`?key=...` or `X-P2Pme-Key`). Unauthenticated probes are dropped immediately with 403 Forbidden without exposing filesystem paths.
   * **Constant-Time Verification:** Server token matching is performed using constant-time string comparisons to eliminate timing side-channel exploits.
 
+### J. Storage Boundaries, Persistence & Disk-Full DoS Prevention
+* **Risk:** Ingestion stream exhausting device storage (`ENOSPC`) causing OS crashes, database corruption, or app instability; or OS cache cleaners purging pairing state on updates.
+* **Mitigation:**
+  * **Permanent Documents Sandbox:** Synced asset index records (`p2pme_synced_camera_assets.json`) and configuration profiles (`.p2pme_config.json`) are stored strictly within OS-protected persistent documents directories (`$HOME/Documents` on iOS and `/data/data/.../files` on Android), guaranteeing survival across OS cache purges and app updates.
+  * **Storage Pre-Flight Protection:** Prior to writing incoming file streams, the server verifies remaining disk capacity via native APIs (`StatFs` on Android, `volumeAvailableCapacityForImportantUsageKey` on iOS). Ingestion is rejected with `HTTP 507 Insufficient Storage` if free space is below safety margins (< 50 MB).
+  * **Atomic Cleanup on Exception:** If an out-of-space event occurs mid-stream, partial file handles are closed and immediately unlinked/deleted from disk, preventing rogue disk consumption and allowing the client to gracefully auto-pause and auto-resume once space is cleared.
+
+
 ---
 
 ## 3. Reporting a Vulnerability

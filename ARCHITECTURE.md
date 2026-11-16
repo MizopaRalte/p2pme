@@ -202,7 +202,7 @@ P2Pme incorporates symmetric high-frequency sampling and batch metadata headers 
    * Streams incoming HTTP `/upload` request byte chunks directly into target files (`DCIM/Camera` or user-defined destination).
    * Computes incoming ingress velocity every 200ms based on chunk bytes ingested against total file content length (`Downloading: 64.8 MB/s`).
    * Parses batch headers to display live download progress: active file index out of total files (`Downloading file 12 of 596`), total batch bytes received out of total batch (`Received 1.25 GB of 5.00 GB • 25%`), and current file percentage.
-   * Surfaces active receiving cards across both Tab 3 (Server) and Tab 2 (Backup).
+   * Surfaces active receiving progress strictly on Tab 3 (Server), keeping Tab 2 dedicated to outbound backup without clutter.
    * **Sender-Exclusive Control (Receiver Lock):** In Server Mode, the receiver operates as a dedicated automated ingestion hub; transfers and pause/resume states are strictly managed by the initiating sender to prevent desynchronization or conflicting two-way transfers.
 
 ---
@@ -223,6 +223,42 @@ P2Pme incorporates symmetric high-frequency sampling and batch metadata headers 
   - `⚡ Connected (USB Cable)`: Direct physical wire link.
   - `🌐 Connected (Mesh / WAN)`: Active Tailscale / WireGuard / Port-forwarded endpoint.
   - `⏳ Waiting for connection / Cellular`: Server offline or peer is on mobile cellular data without an open WAN/Mesh route. Includes an instant 1-tap "Ping/Reconnect" button.
+
+---
+
+## 11. Receiver Storage Capacity Negotiation & Out-of-Space Protocol (HTTP 507)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Sender as Sender (Phone A)
+    participant Receiver as Receiver Server (Phone B / PC)
+
+    Sender->>Receiver: GET /api/info
+    Receiver-->>Sender: 200 OK (storage: { free_bytes: 45GB, total_bytes: 128GB })
+    Note over Sender: Display Receiver Capacity: "42.2 GB Free"<br/>Pre-flight check against batch size
+
+    Sender->>Receiver: POST /upload?name=IMG_01.jpg
+    Note over Receiver: Disk space drops below 50 MB (or ENOSPC)
+    Receiver-->>Sender: HTTP 507 Insufficient Storage ({"error":"STORAGE_FULL"})
+    Note over Receiver: Display Banner: "Device Storage Full"<br/>(Prompt: Free up space in Google Photos)
+
+    Note over Sender: Sender enters Auto-Pause: "PAUSED (RECEIVER FULL)"<br/>Probe Receiver /api/info every 5 seconds
+    Sender->>Receiver: GET /api/info (poll)
+    Receiver-->>Sender: 200 OK (free_bytes: 0)
+
+    Note over Receiver: User taps "Free up space" in Google Photos on Receiver
+    Sender->>Receiver: GET /api/info (poll)
+    Receiver-->>Sender: 200 OK (free_bytes: 35GB)
+    Note over Sender: Free space > 200 MB detected!<br/>Auto-Resume transfer seamlessly
+    Sender->>Receiver: POST /upload?name=IMG_01.jpg (Retry)
+    Receiver-->>Sender: 200 OK (Transfer Resumed)
+```
+
+1. **Native Storage Telemetry:** Servers query real-time filesystem metrics (`StatFs` on Android, `resourceValues` on iOS) and publish available space in `/api/info`. Senders visualize destination capacity before initiating transfers (`Server Storage: 42.2 GB Free`).
+2. **Graceful Out-of-Space Protocol (HTTP 507):** If disk space is exhausted during ingestion, the server aborts writing, deletes partial chunks, returns `HTTP 507 Insufficient Storage`, and displays a device full banner.
+3. **Automated Polling & Resume Loop:** The sender transitions to `serverStorageFull`, pauses the upload stream without desynchronizing state, and queries the receiver's `/api/info` every 5 seconds. As soon as the user clears space on the receiver (e.g. via Google Photos "Free up device storage"), the sender automatically detects the freed capacity and resumes transfer from the exact interrupted item.
+
 
 
 

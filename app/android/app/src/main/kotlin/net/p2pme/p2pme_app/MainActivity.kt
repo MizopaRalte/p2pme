@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.os.StatFs
+import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -53,6 +55,22 @@ class MainActivity : FlutterActivity() {
                         true
                     }
                     result.success(isIgnoring)
+                }
+                "getStorageSpace" -> {
+                    try {
+                        val path = Environment.getDataDirectory()
+                        val stat = StatFs(path.path)
+                        val blockSize = stat.blockSizeLong
+                        val availableBlocks = stat.availableBlocksLong
+                        val totalBlocks = stat.blockCountLong
+                        val map = mapOf(
+                            "free_bytes" to (availableBlocks * blockSize),
+                            "total_bytes" to (totalBlocks * blockSize)
+                        )
+                        result.success(map)
+                    } catch (e: Exception) {
+                        result.success(mapOf("free_bytes" to 0L, "total_bytes" to 0L))
+                    }
                 }
                 "requestIgnoreBatteryOptimization" -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

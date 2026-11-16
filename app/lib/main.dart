@@ -296,6 +296,32 @@ class SyncFolderItem {
     required this.speedMb,
     this.ticket,
   });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'localPath': localPath,
+    'status': status,
+    'connectionTier': connectionTier,
+    'syncMode': syncMode,
+    'fileCount': fileCount,
+    'totalSizeMb': totalSizeMb,
+    'speedMb': speedMb,
+    'ticket': ticket,
+  };
+
+  factory SyncFolderItem.fromJson(Map<String, dynamic> json) => SyncFolderItem(
+    id: json['id']?.toString() ?? '',
+    name: json['name']?.toString() ?? '',
+    localPath: json['localPath']?.toString() ?? '',
+    status: json['status']?.toString() ?? 'Live Sync Active',
+    connectionTier: json['connectionTier']?.toString() ?? 'DIRECT LAN',
+    syncMode: json['syncMode']?.toString() ?? 'ARCHIVE (STORAGE SAVER)',
+    fileCount: (json['fileCount'] as num?)?.toInt() ?? 0,
+    totalSizeMb: (json['totalSizeMb'] as num?)?.toDouble() ?? 0.0,
+    speedMb: (json['speedMb'] as num?)?.toDouble() ?? 0.0,
+    ticket: json['ticket']?.toString(),
+  );
 }
 
 class NearbyPeer {
@@ -310,6 +336,8 @@ class NearbyPeer {
   String? authToken; // paired secret or token
   String? wanHost;
   int? wanPort;
+  int? freeStorageBytes;
+  int? totalStorageBytes;
 
   NearbyPeer({
     required this.id,
@@ -323,6 +351,8 @@ class NearbyPeer {
     this.authToken,
     this.wanHost,
     this.wanPort,
+    this.freeStorageBytes,
+    this.totalStorageBytes,
   });
 }
 
@@ -399,6 +429,86 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
     return '.';
+  }
+
+  int _localStorageFreeBytes = 0;
+  int _localStorageTotalBytes = 0;
+  bool _isReceiverStorageFull = false;
+
+  Future<void> _loadAppConfig() async {
+    try {
+      final baseDir = _getAppBaseDirectory();
+      final configFile = File('$baseDir${Platform.pathSeparator}.p2pme_config.json');
+      if (await configFile.exists()) {
+        final content = await configFile.readAsString();
+        if (content.trim().isNotEmpty) {
+          final json = jsonDecode(content) as Map<String, dynamic>;
+          if (json.containsKey('receiveDestination') && json['receiveDestination'] is String) {
+            final dest = json['receiveDestination'] as String;
+            if (dest.isNotEmpty) {
+              _receiveDestination = dest;
+            }
+          }
+          if (json.containsKey('wifiOnlySync') && json['wifiOnlySync'] is bool) {
+            _wifiOnlySync = json['wifiOnlySync'] as bool;
+          }
+          if (json.containsKey('backgroundSyncEnabled') && json['backgroundSyncEnabled'] is bool) {
+            _backgroundSyncEnabled = json['backgroundSyncEnabled'] as bool;
+          }
+          if (json.containsKey('folders') && json['folders'] is List) {
+            final folderList = (json['folders'] as List)
+                .map((f) => SyncFolderItem.fromJson(f as Map<String, dynamic>))
+                .toList();
+            if (folderList.isNotEmpty) {
+              _folders
+                ..clear()
+                ..addAll(folderList);
+            }
+          }
+          if (mounted) setState(() {});
+          debugPrint('[Config] Loaded persistent configuration successfully');
+        }
+      }
+    } catch (e) {
+      debugPrint('[Config] Failed to load app config: $e');
+    }
+  }
+
+  Future<void> _saveAppConfig() async {
+    try {
+      final baseDir = _getAppBaseDirectory();
+      final dir = Directory(baseDir);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      final configFile = File('$baseDir${Platform.pathSeparator}.p2pme_config.json');
+      final json = {
+        'version': '1.2.0',
+        'receiveDestination': _receiveDestination,
+        'wifiOnlySync': _wifiOnlySync,
+        'backgroundSyncEnabled': _backgroundSyncEnabled,
+        'folders': _folders.map((f) => f.toJson()).toList(),
+      };
+      await configFile.writeAsString(jsonEncode(json));
+      debugPrint('[Config] App configuration saved');
+    } catch (e) {
+      debugPrint('[Config] Failed to save app config: $e');
+    }
+  }
+
+  Future<void> _checkLocalStorageSpace() async {
+    try {
+      final storage = await CameraBackupService.instance.getStorageSpace();
+      if (mounted) {
+        setState(() {
+          _localStorageFreeBytes = storage['free_bytes'] ?? 0;
+          _localStorageTotalBytes = storage['total_bytes'] ?? 0;
+          if (_localStorageFreeBytes > 200 * 1024 * 1024) {
+            _isReceiverStorageFull = false;
+          }
+        });
+      }
+    } catch (_) {}
   }
 
   // Background Sync & Platform Channels
@@ -549,8 +659,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 13;
-  String _currentVersionName = '1.1.1';
+  int _currentVersionCode = 14;
+  String _currentVersionName = '1.2.0';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -848,6 +958,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadAppConfig();
+    _checkLocalStorageSpace();
     _webDropSessionToken = _generateSessionToken();
     _initHubSecret();
     _initServerWanUrl();
@@ -1026,6 +1138,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final type = json['device_type']?.toString() ?? 'pc';
           final port = (json['port'] ?? portToUse) as int;
           final id = json['node_id']?.toString() ?? targetIp;
+          final storageMap = json['storage'] as Map<String, dynamic>?;
+          final freeStorageBytes = (storageMap?['free_bytes'] as num?)?.toInt();
+          final totalStorageBytes = (storageMap?['total_bytes'] as num?)?.toInt();
 
           if (mounted) {
             final idx = _nearbyPeers.indexWhere((p) => p.ip == targetIp || p.id == id);
@@ -1044,6 +1159,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               isPaired: effectiveToken != null && effectiveToken.isNotEmpty,
               wanHost: wanHost ?? existingWanHost,
               wanPort: wanPort ?? existingWanPort,
+              freeStorageBytes: freeStorageBytes,
+              totalStorageBytes: totalStorageBytes,
             );
             setState(() {
               if (idx >= 0) {
@@ -1053,6 +1170,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               }
               if (peer.isPaired) {
                 _savedPairedServer = peer;
+              } else if (_savedPairedServer != null && (_savedPairedServer!.ip == targetIp || _savedPairedServer!.id == id)) {
+                _savedPairedServer!.freeStorageBytes = freeStorageBytes;
+                _savedPairedServer!.totalStorageBytes = totalStorageBytes;
               }
             });
             if (peer.isPaired) {
@@ -1354,6 +1474,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ticket: payload,
           ));
         });
+        _saveAppConfig();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -1757,6 +1878,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       request.response.headers.contentType = ContentType.json;
       final myName = Platform.isAndroid ? 'OnePlus 6T' : (Platform.isWindows ? "Tony's Windows PC" : 'P2Pme Device');
       final myType = Platform.isAndroid ? 'android' : (Platform.isWindows ? 'pc' : 'other');
+      final storage = await CameraBackupService.instance.getStorageSpace();
+      final freeBytes = storage['free_bytes'] ?? 0;
+      final totalBytes = storage['total_bytes'] ?? 0;
       final info = {
         'p2pme': true,
         'device_name': myName,
@@ -1768,6 +1892,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'backup_ticket': _folders.isNotEmpty ? _getFolderTicket(_folders[0]) : null,
         'hub_auth_required': true,
         'hub_key_hint': _hubSecretKey != null && _hubSecretKey!.length >= 8 ? '${_hubSecretKey!.substring(0, 8)}...' : null,
+        'storage': {
+          'free_bytes': freeBytes,
+          'total_bytes': totalBytes,
+          'free_readable': '${(freeBytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB Free',
+        },
       };
       request.response.write(jsonEncode(info));
       await request.response.close();
@@ -1812,6 +1941,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ticket: ticket,
               ));
             });
+            _saveAppConfig();
           }
           request.response
             ..statusCode = HttpStatus.ok
@@ -2046,9 +2176,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!await destDir.exists()) {
         await destDir.create(recursive: true);
       }
-      final outFile = File('${destDir.path}${Platform.pathSeparator}$safeName');
-      final sink = outFile.openWrite();
       final totalExpectedBytes = request.headers.contentLength;
+
+      // Storage Pre-Flight check: reject with 507 if receiver disk space is critically low
+      final storage = await CameraBackupService.instance.getStorageSpace();
+      final freeBytes = storage['free_bytes'] ?? 0;
+      if (freeBytes > 0 && totalExpectedBytes > 0 && freeBytes < (totalExpectedBytes + (50 * 1024 * 1024))) {
+        if (mounted) {
+          setState(() {
+            _isReceiverStorageFull = true;
+          });
+        }
+        request.response
+          ..statusCode = 507
+          ..headers.contentType = ContentType.json
+          ..write(jsonEncode({
+            'error': 'STORAGE_FULL',
+            'message': 'Receiver storage full. Free up space to continue.',
+            'free_bytes': freeBytes,
+          }));
+        await request.response.close();
+        return;
+      }
+
+      final outFile = File('${destDir.path}${Platform.pathSeparator}$safeName');
+      IOSink? sink;
       int receivedThisFile = 0;
       final Stopwatch sampleWatch = Stopwatch()..start();
       int bytesSinceSample = 0;
@@ -2073,31 +2225,68 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
       }
 
-      await for (final chunk in request) {
-        sink.add(chunk);
-        receivedThisFile += chunk.length;
-        bytesSinceSample += chunk.length;
-        _receivingCurrentFileBytesReceived = receivedThisFile;
+      try {
+        sink = outFile.openWrite();
+        await for (final chunk in request) {
+          sink.add(chunk);
+          receivedThisFile += chunk.length;
+          bytesSinceSample += chunk.length;
+          _receivingCurrentFileBytesReceived = receivedThisFile;
 
-        if (sampleWatch.elapsedMilliseconds >= 200) {
-          final double seconds = sampleWatch.elapsedMicroseconds / 1000000.0;
-          if (seconds > 0) {
-            final speed = (bytesSinceSample / seconds) / (1024 * 1024);
-            if (mounted) {
-              setState(() {
-                _receivingSpeedMBps = speed;
-                if (totalExpectedBytes > 0) {
-                  _receivingProgressRatio = (receivedThisFile / totalExpectedBytes).clamp(0.0, 1.0);
-                }
-                _receivingBatchBytesReceived = batchBytesSent + receivedThisFile;
-              });
+          if (sampleWatch.elapsedMilliseconds >= 200) {
+            final double seconds = sampleWatch.elapsedMicroseconds / 1000000.0;
+            if (seconds > 0) {
+              final speed = (bytesSinceSample / seconds) / (1024 * 1024);
+              if (mounted) {
+                setState(() {
+                  _receivingSpeedMBps = speed;
+                  if (totalExpectedBytes > 0) {
+                    _receivingProgressRatio = (receivedThisFile / totalExpectedBytes).clamp(0.0, 1.0);
+                  }
+                  _receivingBatchBytesReceived = batchBytesSent + receivedThisFile;
+                });
+              }
             }
+            sampleWatch.reset();
+            bytesSinceSample = 0;
           }
-          sampleWatch.reset();
-          bytesSinceSample = 0;
+        }
+        await sink.close();
+        sink = null;
+      } catch (e) {
+        try {
+          await sink?.close();
+        } catch (_) {}
+        try {
+          if (await outFile.exists()) {
+            await outFile.delete();
+          }
+        } catch (_) {}
+
+        if (e is FileSystemException || e.toString().toLowerCase().contains('space') || e.toString().contains('28')) {
+          if (mounted) {
+            setState(() {
+              _isReceiverStorageFull = true;
+              _isReceivingActive = false;
+            });
+          }
+          request.response
+            ..statusCode = 507
+            ..headers.contentType = ContentType.json
+            ..write(jsonEncode({
+              'error': 'STORAGE_FULL',
+              'message': 'Receiver storage full. Free up space to continue.',
+            }));
+          await request.response.close();
+          return;
+        } else {
+          request.response
+            ..statusCode = HttpStatus.internalServerError
+            ..write('File write error: $e');
+          await request.response.close();
+          return;
         }
       }
-      await sink.close();
 
       final fileLen = await outFile.length();
       if (mounted) {
@@ -2291,6 +2480,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _toggleBackgroundService(bool enable) async {
     setState(() => _backgroundSyncEnabled = enable);
+    _saveAppConfig();
     if (Platform.isAndroid) {
       try {
         if (enable) {
@@ -2804,13 +2994,77 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Accepts incoming photo backups and file drops directly on your local network.',
+                        'Accepts incoming photo backups and file drops directly on your local network.'
+                        '${_localStorageTotalBytes > 0 ? " • Storage: ${(_localStorageFreeBytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB Free / ${(_localStorageTotalBytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB" : ""}',
                         style: TextStyle(
                           fontSize: 12,
                           color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
                         ),
                       ),
                     ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Receiver Storage Full Alert Banner
+          if (_isReceiverStorageFull) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.red.shade700, width: 1.5),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.disc_full_rounded, color: Colors.red.shade700, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Device Storage Full',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: isDark ? Colors.red.shade200 : Colors.red.shade900,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Incoming photo transfers are paused. Open Google Photos and tap "Free up space" to resume automatically.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? Colors.red.shade300 : Colors.red.shade800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF282A2D) : const Color(0xFFF1F3F4),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline_rounded, size: 16, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Note: If this device is only sending photos to another phone or computer, you do not need to run this server.',
+                    style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700),
                   ),
                 ),
               ],
@@ -4509,136 +4763,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ==========================================
   // AUTO-SYNC FOLDERS LIST & BACKUP TAB
   // ==========================================
-  Widget _buildActiveReceivingBanner(bool isDark) {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.only(bottom: 14),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: GooglePhotosColors.green.withValues(alpha: 0.6), width: 1.5),
-      ),
-      color: isDark ? const Color(0xFF1E2822) : const Color(0xFFE6F4EA),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(
-                    color: GooglePhotosColors.green,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.downloading_rounded, color: Colors.white, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _receivingTotalFiles > 0
-                                  ? 'Downloading file $_receivingCurrentFileIndex of $_receivingTotalFiles'
-                                  : 'Downloading Incoming File...',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF137333),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: GooglePhotosColors.green,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              'Downloading: ${_receivingSpeedMBps.toStringAsFixed(1)} MB/s',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _receivingFileName != null ? 'Saving: $_receivingFileName' : 'Ingesting files to server...',
-                        style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (_receivingBatchTotalBytes > 0) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Total Batch: ${CameraBackupService.formatBytes(_receivingBatchBytesReceived)} of ${CameraBackupService.formatBytes(_receivingBatchTotalBytes)}',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.grey.shade300 : Colors.grey.shade800),
-                  ),
-                  Text(
-                    '${((_receivingBatchBytesReceived / _receivingBatchTotalBytes) * 100).toInt().clamp(0, 100)}%',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.green),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: (_receivingBatchBytesReceived / _receivingBatchTotalBytes).clamp(0.0, 1.0),
-                  minHeight: 8,
-                  backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.2),
-                  color: GooglePhotosColors.green,
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-            ClipRRect(
-              borderRadius: BorderRadius.circular(3),
-              child: LinearProgressIndicator(
-                value: _receivingProgressRatio > 0 ? _receivingProgressRatio : null,
-                minHeight: 4,
-                backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.15),
-                color: GooglePhotosColors.green.withValues(alpha: 0.7),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                const Icon(Icons.lock_outline_rounded, size: 12, color: GooglePhotosColors.green),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    'Receiver Mode Active: incoming transfer in progress (controlled by sender).',
-                    style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildFolderList() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       children: [
-        if (_isReceivingActive)
-          _buildActiveReceivingBanner(isDark),
         _buildCameraRollAutoBackupCard(),
         _buildConnectedServerCard(isDark),
         const SizedBox(height: 10),
@@ -4692,7 +4821,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildConnectedServerCard(bool isDark) {
     final livePeer = _nearbyPeers.cast<NearbyPeer?>().firstWhere(
       (p) => p != null && (p.isPaired || (_savedPairedServer != null && (p.ip == _savedPairedServer!.ip || p.name == _savedPairedServer!.name || (p.wanHost != null && p.wanHost == _savedPairedServer!.wanHost)))),
-      orElse: () => _nearbyPeers.isNotEmpty ? _nearbyPeers.first : null,
+      orElse: () => null,
     );
 
     final displayPeer = livePeer ?? _savedPairedServer;
@@ -4798,9 +4927,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '$serverIp:$serverPort${wanHost != null && wanHost.isNotEmpty ? ' • WAN: $wanHost' : ''}',
+                      '$serverIp:$serverPort${wanHost != null && wanHost.isNotEmpty ? ' • WAN: $wanHost' : ''}'
+                      '${displayPeer.freeStorageBytes != null && displayPeer.freeStorageBytes! > 0 ? " • ${(displayPeer.freeStorageBytes! / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB Free" : ""}',
                       style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368)),
                     ),
+                    if (displayPeer.freeStorageBytes != null && displayPeer.freeStorageBytes! > 0 && CameraBackupService.instance.batchTotalBytes > 0 && displayPeer.freeStorageBytes! < CameraBackupService.instance.batchTotalBytes) ...[
+                      const SizedBox(height: 3),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '⚠️ Receiver storage low: ${(displayPeer.freeStorageBytes! / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB free for ${(CameraBackupService.instance.batchTotalBytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB batch',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber.shade800),
+                        ),
+                      ),
+                    ],
                   ] else ...[
                     Text(
                       'Connect to your home phone or PC to back up photos automatically.',
@@ -5226,6 +5370,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ticket: ticket,
                       ));
                     });
+                    _saveAppConfig();
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Now syncing folder: $name')),
                     );
@@ -5319,6 +5464,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ticket: payload,
                     ));
                   });
+                  _saveAppConfig();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Successfully joined peer folder!')),
                   );
@@ -5400,6 +5546,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               setState(() {
                 _folders.removeWhere((f) => f.id == folder.id);
               });
+              _saveAppConfig();
               try {
                 P2PBridge.instance.stopWatcher(folder.id);
               } catch (_) {}
@@ -5422,6 +5569,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final service = CameraBackupService.instance;
     final isSyncing = service.state == CameraBackupState.syncing;
     final isPaused = service.isSyncPaused;
+    final isStorageFull = service.state == CameraBackupState.serverStorageFull;
     final isUpToDate = service.state == CameraBackupState.upToDate && service.pendingAssetsCount == 0;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -5431,9 +5579,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
         side: BorderSide(
-          color: isUpToDate
-              ? Colors.green.shade400
-              : GooglePhotosColors.blue.withValues(alpha: 0.5),
+          color: isStorageFull
+              ? Colors.amber.shade700
+              : (isUpToDate
+                  ? Colors.green.shade400
+                  : GooglePhotosColors.blue.withValues(alpha: 0.5)),
           width: 1.5,
         ),
       ),
@@ -5471,28 +5621,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: isUpToDate ? Colors.green.shade50 : Colors.blue.shade50,
+                              color: isStorageFull
+                                  ? Colors.amber.shade50
+                                  : (isUpToDate ? Colors.green.shade50 : Colors.blue.shade50),
                               border: Border.all(
-                                color: isUpToDate ? Colors.green.shade400 : Colors.blue.shade400,
+                                color: isStorageFull
+                                    ? Colors.amber.shade700
+                                    : (isUpToDate ? Colors.green.shade400 : Colors.blue.shade400),
                               ),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              isSyncing
-                                  ? 'UPLOADING (${(service.overallBatchProgressRatio * 100).toInt()}%)'
-                                  : (isPaused
-                                      ? 'PAUSED'
-                                      : (isUpToDate
-                                          ? 'UP TO DATE'
-                                          : '${service.pendingAssetsCount} NEW (${service.formattedPendingBytes})')),
+                              isStorageFull
+                                  ? 'PAUSED (RECEIVER FULL)'
+                                  : (isSyncing
+                                      ? 'UPLOADING (${(service.overallBatchProgressRatio * 100).toInt()}%)'
+                                      : (isPaused
+                                          ? 'PAUSED'
+                                          : (isUpToDate
+                                              ? 'UP TO DATE'
+                                              : '${service.pendingAssetsCount} NEW (${service.formattedPendingBytes})'))),
                               style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.bold,
-                                color: isSyncing
-                                    ? GooglePhotosColors.blue
-                                    : (isPaused
-                                        ? Colors.orange.shade800
-                                        : (isUpToDate ? Colors.green.shade800 : Colors.blue.shade800)),
+                                color: isStorageFull
+                                    ? Colors.amber.shade900
+                                    : (isSyncing
+                                        ? GooglePhotosColors.blue
+                                        : (isPaused
+                                            ? Colors.orange.shade800
+                                            : (isUpToDate ? Colors.green.shade800 : Colors.blue.shade800))),
                               ),
                             ),
                           ),
@@ -5500,13 +5658,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        isSyncing && service.currentSyncingFilename != null
-                            ? 'Sending ${service.currentSyncIndex} of ${service.pendingAssetsCount} files • ${service.currentSyncingFilename}'
-                            : (isPaused
-                                ? 'Backup paused (${service.formattedBatchBytes}) • Tap "Resume Backup" to continue'
-                                : (service.totalDeviceAssets > 0
-                                    ? '${service.totalDeviceAssets} photos on device • ${service.pendingAssetsCount} pending backup (${service.formattedPendingBytes})'
-                                    : 'One-way automatic camera backup to server.')),
+                        isStorageFull
+                            ? 'Receiver is out of storage. Transfer will auto-resume once space is cleared.'
+                            : (isSyncing && service.currentSyncingFilename != null
+                                ? 'Sending ${service.currentSyncIndex} of ${service.pendingAssetsCount} files • ${service.currentSyncingFilename}'
+                                : (isPaused
+                                    ? 'Backup paused (${service.formattedBatchBytes}) • Tap "Resume Backup" to continue'
+                                    : (service.totalDeviceAssets > 0
+                                        ? '${service.totalDeviceAssets} photos on device • ${service.pendingAssetsCount} pending backup (${service.formattedPendingBytes})'
+                                        : 'One-way automatic camera backup to server.'))),
                         style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -5515,6 +5675,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ],
             ),
+            if (isStorageFull) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.amber.shade700, width: 1),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Receiver storage is full. Transfer paused. Tap "Free up space" in Google Photos on your receiver to automatically resume.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.amber.shade200 : Colors.amber.shade900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (isSyncing) ...[
               const SizedBox(height: 10),
               // Overall Batch Progress
@@ -5609,37 +5796,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
-                    onPressed: _isReceivingActive
-                        ? null
-                        : (isSyncing
-                            ? () {
-                                service.pauseSync();
-                                if (mounted) setState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Backup paused. Tap "Resume Backup" to continue.'),
-                                    duration: Duration(seconds: 2),
-                                  ),
-                                );
-                              }
-                            : _syncCameraRollToConnectedPeer),
-                    icon: _isReceivingActive
-                        ? const Icon(Icons.downloading_rounded, size: 16)
-                        : (isSyncing
-                            ? const Icon(Icons.pause_circle_filled_rounded, size: 18)
-                            : (isPaused
-                                ? const Icon(Icons.play_circle_filled_rounded, size: 18)
-                                : const Icon(Icons.sync_rounded, size: 16))),
+                    onPressed: isSyncing
+                        ? () {
+                            service.pauseSync();
+                            if (mounted) setState(() {});
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Backup paused. Tap "Resume Backup" to continue.'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        : _syncCameraRollToConnectedPeer,
+                    icon: isSyncing
+                        ? const Icon(Icons.pause_circle_filled_rounded, size: 18)
+                        : (isPaused
+                            ? const Icon(Icons.play_circle_filled_rounded, size: 18)
+                            : const Icon(Icons.sync_rounded, size: 16)),
                     label: Text(
-                      _isReceivingActive
-                          ? 'Server Busy (Receiving)'
-                          : (isSyncing
-                              ? 'Pause Backup'
-                              : (isPaused
-                                  ? 'Resume Backup'
-                                  : (service.pendingAssetsCount > 0
-                                      ? 'Backup New (${service.pendingAssetsCount})'
-                                      : 'Sync Camera Roll'))),
+                      isSyncing
+                          ? 'Pause Backup'
+                          : (isPaused
+                              ? 'Resume Backup'
+                              : (service.pendingAssetsCount > 0
+                                  ? 'Backup New (${service.pendingAssetsCount})'
+                                  : 'Sync Camera Roll')),
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -5847,7 +6028,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     selected: _wifiOnlySync,
                     label: const Text('Wi-Fi Only', style: TextStyle(fontSize: 11)),
                     avatar: Icon(_wifiOnlySync ? Icons.wifi : Icons.signal_cellular_alt, size: 14),
-                    onSelected: (val) => setState(() => _wifiOnlySync = val),
+                    onSelected: (val) {
+                      setState(() => _wifiOnlySync = val);
+                      _saveAppConfig();
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -6625,6 +6809,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   setState(() {
                     _receiveDestination = path;
                   });
+                  _saveAppConfig();
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(

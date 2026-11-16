@@ -27,6 +27,7 @@ enum CameraBackupState {
   checking,
   syncing,
   upToDate,
+  serverStorageFull,
   error,
 }
 
@@ -39,6 +40,7 @@ class CameraBackupService {
   final Set<String> _syncedAssetIds = {};
   DateTime? _lastSyncTime;
   CameraBackupState _state = CameraBackupState.idle;
+  bool _isServerStorageFull = false;
   String? _lastError;
 
   int _totalDeviceAssets = 0;
@@ -50,6 +52,7 @@ class CameraBackupService {
   Stream<CameraBackupState> get stateStream => _stateController.stream;
 
   CameraBackupState get state => _state;
+  bool get isServerStorageFull => _isServerStorageFull;
   int get totalDeviceAssets => _totalDeviceAssets;
   int get pendingAssetsCount => _pendingAssetsCount;
   int get currentSyncIndex => _currentSyncIndex;
@@ -75,14 +78,34 @@ class CameraBackupService {
   }
 
   Future<File> _getStorageFile() async {
-    final baseDir = Platform.isAndroid
-        ? '/data/data/net.p2pme.p2pme_app/files'
-        : (Platform.isIOS ? (await Directory.systemTemp.createTemp()).parent.path : '.');
+    String baseDir;
+    if (Platform.isAndroid) {
+      baseDir = '/data/data/net.p2pme.p2pme_app/files';
+    } else if (Platform.isIOS) {
+      final home = Platform.environment['HOME'];
+      baseDir = (home != null && home.isNotEmpty) ? '$home/Documents' : '.';
+    } else {
+      baseDir = '.';
+    }
     final dir = Directory(baseDir);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
-    return File('${dir.path}${Platform.pathSeparator}p2pme_synced_camera_assets.json');
+    final targetFile = File('${dir.path}${Platform.pathSeparator}p2pme_synced_camera_assets.json');
+
+    // Migration helper: If an older index exists in systemTemp on iOS, migrate it to permanent Documents storage
+    if (Platform.isIOS && !await targetFile.exists()) {
+      try {
+        final legacyTempDir = (await Directory.systemTemp.createTemp()).parent;
+        final legacyFile = File('${legacyTempDir.path}${Platform.pathSeparator}p2pme_synced_camera_assets.json');
+        if (await legacyFile.exists()) {
+          await legacyFile.copy(targetFile.path);
+          debugPrint('[CameraBackup] Migrated synced assets index from systemTemp to permanent Documents storage');
+        }
+      } catch (_) {}
+    }
+
+    return targetFile;
   }
 
   Future<void> _initStorage() async {
@@ -185,6 +208,8 @@ class CameraBackupService {
                 final lower = name.toLowerCase();
                 if (!name.startsWith('.') &&
                     !name.contains('.trashed') &&
+                    !lower.contains('screenshot') &&
+                    !entity.path.toLowerCase().contains('screenshot') &&
                     (lower.endsWith('.jpg') ||
                      lower.endsWith('.jpeg') ||
                      lower.endsWith('.png') ||
@@ -422,6 +447,19 @@ class CameraBackupService {
               _lastSyncTime = DateTime.now();
               await _saveStorage();
               break;
+            } else if (resp.statusCode == 507) {
+              debugPrint('[CameraBackup] Receiver storage full (HTTP 507). Pausing and awaiting cleanup...');
+              _isServerStorageFull = true;
+              _state = CameraBackupState.serverStorageFull;
+              _stateController.add(_state);
+              _batchBytesSent = (_batchBytesSent - _currentFileBytesSent).clamp(0, _batchTotalBytes);
+              _currentFileBytesSent = 0;
+              await _waitForReceiverStorageAvailable(activeHost, activePort);
+              _isServerStorageFull = false;
+              _state = CameraBackupState.syncing;
+              _stateController.add(_state);
+              i--;
+              break;
             } else {
               debugPrint('[CameraBackup] Peer returned status ${resp.statusCode} for ${item.filename}');
             }
@@ -470,6 +508,30 @@ class CameraBackupService {
     _stateController.add(_state);
   }
 
+  Future<void> _waitForReceiverStorageAvailable(String host, int port) async {
+    while (!_isSyncPaused) {
+      await Future.delayed(const Duration(seconds: 5));
+      if (_isSyncPaused) break;
+      try {
+        final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+        final req = await client.getUrl(Uri.parse('http://$host:$port/api/info'));
+        final resp = await req.close();
+        if (resp.statusCode == HttpStatus.ok) {
+          final body = await utf8.decoder.bind(resp).join();
+          final json = jsonDecode(body) as Map<String, dynamic>;
+          final storage = json['storage'] as Map<String, dynamic>?;
+          final freeBytes = (storage?['free_bytes'] as num?)?.toInt() ?? 0;
+          if (freeBytes > 200 * 1024 * 1024) { // At least 200 MB free
+            debugPrint('[CameraBackup] Receiver storage freed ($freeBytes bytes available). Resuming sync!');
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('[CameraBackup] Waiting for receiver storage probe error: $e');
+      }
+    }
+  }
+
   Future<bool> openUrl(String url) async {
     if (Platform.isIOS) {
       try {
@@ -480,5 +542,32 @@ class CameraBackupService {
       }
     }
     return false;
+  }
+
+  static const MethodChannel _bgChannel = MethodChannel('net.p2pme/background_sync');
+
+  Future<Map<String, int>> getStorageSpace() async {
+    try {
+      if (Platform.isIOS) {
+        final res = await _iosChannel.invokeMethod('getStorageSpace');
+        if (res is Map) {
+          return {
+            'free_bytes': (res['free_bytes'] as num?)?.toInt() ?? 0,
+            'total_bytes': (res['total_bytes'] as num?)?.toInt() ?? 0,
+          };
+        }
+      } else if (Platform.isAndroid) {
+        final res = await _bgChannel.invokeMethod('getStorageSpace');
+        if (res is Map) {
+          return {
+            'free_bytes': (res['free_bytes'] as num?)?.toInt() ?? 0,
+            'total_bytes': (res['total_bytes'] as num?)?.toInt() ?? 0,
+          };
+        }
+      }
+    } catch (e) {
+      debugPrint('[CameraBackup] Error getting storage space: $e');
+    }
+    return {'free_bytes': 0, 'total_bytes': 0};
   }
 }

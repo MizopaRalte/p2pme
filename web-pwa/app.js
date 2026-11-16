@@ -1053,6 +1053,31 @@
             fileSuccess = true;
             successCount++;
             batchBytesSent += (file.size || 0);
+          } else if (res.status === 507) {
+            if (sendStatus) {
+              sendStatus.innerHTML = `<span style="color:#F9AB00;">⚠️ Receiver storage is full. Transfer paused. Tap "Free up space" in Google Photos on your receiver to auto-resume...</span>`;
+            }
+            // Poll for receiver free space before retrying
+            let freed = false;
+            for (let poll = 0; poll < 60; poll++) {
+              await new Promise(r => setTimeout(r, 5000));
+              try {
+                const infoRes = await fetch(`http://${hub.host}:${hub.port}/api/info`);
+                if (infoRes.ok) {
+                  const infoJson = await infoRes.json();
+                  if (infoJson.storage && infoJson.storage.free_bytes > 200 * 1024 * 1024) {
+                    freed = true;
+                    break;
+                  }
+                }
+              } catch (_) {}
+            }
+            if (freed) {
+              attempt--;
+              continue;
+            } else {
+              throw new Error('Receiver storage remained full (HTTP 507)');
+            }
           } else {
             throw new Error(`Server returned HTTP ${res.status}`);
           }
