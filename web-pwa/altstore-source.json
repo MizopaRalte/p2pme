@@ -42,8 +42,8 @@
           "date": "2026-11-16",
           "localizedDescription": "Zero-conflict cryptographic security: 1-tap regeneration and revocation for Server Hub Secret Keys (256-bit CSPRNG) and Folder Pairing Tickets (BLAKE3), with dynamic QR updates.",
           "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.0.6.ipa",
-          "size": 7592350,
-          "sha256": "1e5d8482818c74845652395760ba83b1b34e9012f492cd78cd88b69b5fcb4d1c",
+          "size": 7420808,
+          "sha256": "265e5f06d3b6cdca74ed731eb63dac38b89d398ceffbedf98e934b57ffeff213",
           "minOSVersion": "15.0",
           "appPermissions": {
             "entitlements": [],
