@@ -54,7 +54,7 @@ import Photos
         result(fetchResult.count)
       case "getAssets":
         let args = call.arguments as? [String: Any]
-        let limit = args?["limit"] as? Int ?? 100
+        let limit = args?["limit"] as? Int ?? 0
         let sinceTimestamp = args?["since"] as? Double
         
         let fetchOptions = PHFetchOptions()
@@ -65,7 +65,7 @@ import Photos
         }
         let fetchResult = PHAsset.fetchAssets(with: fetchOptions)
         var items: [[String: Any]] = []
-        let count = min(fetchResult.count, limit)
+        let count = (limit > 0) ? min(fetchResult.count, limit) : fetchResult.count
         for i in 0..<count {
           let asset = fetchResult.object(at: i)
           let resources = PHAssetResource.assetResources(for: asset)

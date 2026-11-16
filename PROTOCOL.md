@@ -168,13 +168,23 @@ Content-Type: application/json
 When scanned by the client camera in Tab 2 (Backup):
 1. **Server QR Code Schema:**
 ```text
-http://<host>:<port>?key=<256-bit_hex_token>
+http://<host>:<port>?key=<256-bit_hex_token>[&wan=<remote_host>:<remote_port>]
 ```
-2. **Client Parsing Sequence:**
-   * Extracts IPv4 / domain address, port (defaults to 45455), and `key` authorization token.
-   * Dispatches `GET /api/info` with connection timeout of 4 seconds.
-   * If server responds with valid P2Pme metadata (`"p2pme": true`), client marks the peer as `isPaired: true` and associates `authToken`.
-   * Client persists connection parameters to local configuration (`.paired_server`) and initiates immediate background camera sync.
+* `<host>:<port>`: Primary local IP (LAN) or direct USB cable link-local IP (e.g. `192.168.1.100:45455` or `192.168.42.129:45455`).
+* `key`: 256-bit CSPRNG authorization token required for all subsequent API and upload calls.
+* `wan` *(optional)*: Public or Mesh WAN endpoint (e.g. Tailscale IP `100.x.y.z:45455` or public domain with port forwarding) enabling seamless cellular 5G/LTE failover.
+
+2. **Client Parsing & Dual Socket Failover Sequence:**
+   * Extracts LAN IPv4/domain address, port (defaults to 45455), `key` authorization token, and optional `wan` endpoint.
+   * Dispatches initial handshake probe `GET /api/info` to the LAN address (4s timeout).
+   * If LAN probe fails (e.g. peer is operating on cellular data), client automatically retries against the `wan` endpoint.
+   * If server responds with valid P2Pme metadata (`"p2pme": true`), client marks the peer as `isPaired: true`, associates `authToken`, persists configuration to `.paired_server`, and triggers camera roll auto-backup.
+   * In-flight socket failover: When uploading photos on the go, if the LAN socket aborts due to Wi-Fi disconnect, `CameraBackupService` seamlessly re-routes remaining pending assets to the secondary WAN socket.
+
+### D. Boundless Asset Ingestion Semantics
+* iOS PhotoKit (`PHFetchResult`) and Android MediaStore queries accept a scan limit parameter.
+* When `limit <= 0`, queries run without arbitrary ceiling caps, allowing 100% of camera roll assets (e.g. 596+ photos) to be indexed and queued for synchronization.
+* Photo uniqueness is validated via local SHA-256 / BLAKE3 cataloging to prevent duplicate re-transmission.
 
 ### B. Folder Pairing Ticket Serialization
 Folder tickets are encoded as compact Base64-URL strings:

@@ -48,6 +48,7 @@ lockout_test.txt
 test_quickdrop_from_pc.pdf
 
 # Reference materials
+sidestore_setup/
 reference/
 .wrangler/
 

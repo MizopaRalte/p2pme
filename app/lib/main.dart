@@ -308,6 +308,8 @@ class NearbyPeer {
   final List<String> folders;
   bool isPaired;
   String? authToken; // paired secret or token
+  String? wanHost;
+  int? wanPort;
 
   NearbyPeer({
     required this.id,
@@ -319,6 +321,8 @@ class NearbyPeer {
     this.folders = const [],
     this.isPaired = false,
     this.authToken,
+    this.wanHost,
+    this.wanPort,
   });
 }
 
@@ -532,11 +536,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _beaconTimer;
   Timer? _nearbyScanTimer;
   final List<NearbyPeer> _nearbyPeers = [];
+  NearbyPeer? _savedPairedServer;
+  String? _serverRemoteWanUrl;
+  String? _usbCableIp;
+  bool _isUsbCableConnected = false;
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 11;
-  String _currentVersionName = '1.0.9';
+  int _currentVersionCode = 12;
+  String _currentVersionName = '1.1.0';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -836,6 +844,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _webDropSessionToken = _generateSessionToken();
     _initHubSecret();
+    _initServerWanUrl();
     if (Platform.isAndroid) {
       final sampleImg = File('/sdcard/Pictures/Screenshots/Screenshot_20260622-194857.jpg');
       if (sampleImg.existsSync() && _selectedFilePaths.isEmpty) {
@@ -998,7 +1007,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> _probeIp(HttpClient client, String targetIp, {int? targetPort, String? authToken}) async {
+  Future<bool> _probeIp(HttpClient client, String targetIp, {int? targetPort, String? authToken, String? wanHost, int? wanPort}) async {
     final portToUse = targetPort ?? _webDropPort;
     try {
       final req = await client.getUrl(Uri.parse('http://$targetIp:$portToUse/api/info'));
@@ -1015,6 +1024,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (mounted) {
             final idx = _nearbyPeers.indexWhere((p) => p.ip == targetIp || p.id == id);
             final existingToken = idx >= 0 ? _nearbyPeers[idx].authToken : null;
+            final existingWanHost = idx >= 0 ? _nearbyPeers[idx].wanHost : null;
+            final existingWanPort = idx >= 0 ? _nearbyPeers[idx].wanPort : null;
             final effectiveToken = (authToken != null && authToken.isNotEmpty) ? authToken : existingToken;
             final peer = NearbyPeer(
               id: id,
@@ -1025,12 +1036,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               lastSeen: DateTime.now(),
               authToken: effectiveToken,
               isPaired: effectiveToken != null && effectiveToken.isNotEmpty,
+              wanHost: wanHost ?? existingWanHost,
+              wanPort: wanPort ?? existingWanPort,
             );
             setState(() {
               if (idx >= 0) {
                 _nearbyPeers[idx] = peer;
               } else {
                 _nearbyPeers.add(peer);
+              }
+              if (peer.isPaired) {
+                _savedPairedServer = peer;
               }
             });
             if (peer.isPaired) {
@@ -1169,12 +1185,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'deviceType': peer.deviceType,
         'authToken': peer.authToken,
         'isPaired': peer.isPaired,
+        'wanHost': peer.wanHost,
+        'wanPort': peer.wanPort,
       });
       await file.parent.create(recursive: true);
       await file.writeAsString(data);
+      if (mounted) {
+        setState(() => _savedPairedServer = peer);
+      }
     } catch (e) {
       debugPrint('Failed to save paired server: $e');
     }
+  }
+
+  Future<void> _unpairServer() async {
+    try {
+      final baseDir = _getAppBaseDirectory();
+      final file = File('$baseDir${Platform.pathSeparator}.paired_server');
+      if (await file.exists()) {
+        await file.delete();
+      }
+      if (mounted) {
+        setState(() {
+          _savedPairedServer = null;
+          _nearbyPeers.removeWhere((p) => p.isPaired);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unpaired from server.'),
+            backgroundColor: GooglePhotosColors.blue,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to unpair server: $e');
+    }
+  }
+
+  Future<void> _initServerWanUrl() async {
+    try {
+      final baseDir = _getAppBaseDirectory();
+      final wanFile = File('$baseDir${Platform.pathSeparator}.server_wan');
+      if (await wanFile.exists()) {
+        final content = (await wanFile.readAsString()).trim();
+        if (content.isNotEmpty && mounted) {
+          setState(() => _serverRemoteWanUrl = content);
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveServerWanUrl(String url) async {
+    try {
+      final baseDir = _getAppBaseDirectory();
+      final wanFile = File('$baseDir${Platform.pathSeparator}.server_wan');
+      if (url.trim().isEmpty) {
+        if (await wanFile.exists()) await wanFile.delete();
+      } else {
+        await wanFile.parent.create(recursive: true);
+        await wanFile.writeAsString(url.trim());
+      }
+      if (mounted) {
+        setState(() => _serverRemoteWanUrl = url.trim().isEmpty ? null : url.trim());
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadPairedServer() async {
@@ -1188,9 +1262,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final ip = map['ip'] as String?;
           final port = map['port'] as int? ?? _webDropPort;
           final authToken = map['authToken'] as String?;
+          final name = map['name'] as String? ?? 'Home Backup Hub';
+          final deviceType = map['deviceType'] as String? ?? 'pc';
+          final id = map['id'] as String? ?? (ip ?? 'server');
+          final wanHost = map['wanHost'] as String?;
+          final wanPort = map['wanPort'] as int?;
+
           if (ip != null && ip.isNotEmpty) {
+            final loadedPeer = NearbyPeer(
+              id: id,
+              name: name,
+              ip: ip,
+              port: port,
+              deviceType: deviceType,
+              lastSeen: DateTime.now(),
+              authToken: authToken,
+              isPaired: true,
+              wanHost: wanHost,
+              wanPort: wanPort,
+            );
+            if (mounted) {
+              setState(() => _savedPairedServer = loadedPeer);
+            }
+
             final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
-            await _probeIp(client, ip, targetPort: port, authToken: authToken);
+            final lanSuccess = await _probeIp(client, ip, targetPort: port, authToken: authToken, wanHost: wanHost, wanPort: wanPort);
+            if (!lanSuccess && wanHost != null && wanHost.isNotEmpty && wanHost != ip) {
+              await _probeIp(client, wanHost, targetPort: wanPort ?? port, authToken: authToken, wanHost: wanHost, wanPort: wanPort);
+            }
           }
         }
       }
@@ -1295,6 +1394,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String host = clean;
     int port = _webDropPort;
     String? authToken;
+    String? wanHost;
+    int? wanPort;
 
     if (uri != null) {
       if (uri.host.isNotEmpty) {
@@ -1305,6 +1406,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       if (uri.queryParameters.containsKey('key')) {
         authToken = uri.queryParameters['key'];
+      }
+      if (uri.queryParameters.containsKey('wan')) {
+        final rawWan = uri.queryParameters['wan']!;
+        final wanUri = Uri.tryParse(rawWan.startsWith('http') ? rawWan : 'http://$rawWan');
+        if (wanUri != null && wanUri.host.isNotEmpty) {
+          wanHost = wanUri.host;
+          wanPort = wanUri.port != 0 ? wanUri.port : _webDropPort;
+        }
       }
     }
 
@@ -1349,7 +1458,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
-    final success = await _probeIp(client, host, targetPort: port, authToken: authToken);
+    var success = await _probeIp(client, host, targetPort: port, authToken: authToken, wanHost: wanHost, wanPort: wanPort);
+    if (!success && wanHost != null && wanHost.isNotEmpty && wanHost != host) {
+      success = await _probeIp(client, wanHost, targetPort: wanPort ?? port, authToken: authToken, wanHost: wanHost, wanPort: wanPort);
+    }
+
+    // Always persist the paired server record so the device remembers it across restarts and network switches
+    final pairedPeer = NearbyPeer(
+      id: host,
+      name: 'Server ($host)',
+      ip: host,
+      port: port,
+      deviceType: 'pc',
+      lastSeen: DateTime.now(),
+      authToken: authToken,
+      isPaired: true,
+      wanHost: wanHost,
+      wanPort: wanPort,
+    );
+    await _savePairedServer(pairedPeer);
 
     if (success) {
       if (mounted) {
@@ -1365,8 +1492,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not reach server at $host:$port. Ensure both devices are on the same Wi-Fi and Server Hub is running.'),
-            backgroundColor: GooglePhotosColors.red,
+            content: Text('✓ Server ($host) paired! Waiting for Wi-Fi or Remote connection to begin backup.'),
+            backgroundColor: GooglePhotosColors.blue,
             duration: const Duration(seconds: 5),
           ),
         );
@@ -1434,28 +1561,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _triggerAutoCameraBackup() async {
     if (_isAutoBackingUp) return;
-    if (_nearbyPeers.isEmpty) return;
+    final activePeer = _nearbyPeers.isNotEmpty
+        ? _nearbyPeers.firstWhere(
+            (p) => p.deviceType.toLowerCase() == 'android' || p.name.toLowerCase().contains('oneplus') || p.deviceType.toLowerCase() == 'pc',
+            orElse: () => _nearbyPeers.first,
+          )
+        : _savedPairedServer;
+    if (activePeer == null) return;
     final pending = CameraBackupService.instance.pendingAssetsCount;
     if (pending == 0) return;
 
     _isAutoBackingUp = true;
     try {
-      final targetPeer = _nearbyPeers.firstWhere(
-        (p) => p.deviceType.toLowerCase() == 'android' || p.name.toLowerCase().contains('oneplus') || p.deviceType.toLowerCase() == 'pc',
-        orElse: () => _nearbyPeers.first,
-      );
-
-      final token = targetPeer.authToken ?? _hubSecretKey ?? _webDropSessionToken;
+      final token = activePeer.authToken ?? _savedPairedServer?.authToken ?? _hubSecretKey ?? _webDropSessionToken;
       final transferred = await CameraBackupService.instance.syncPendingToPeer(
-        peerIp: targetPeer.ip,
-        peerPort: targetPeer.port,
+        peerIp: activePeer.ip,
+        peerPort: activePeer.port,
         token: token,
+        wanHost: activePeer.wanHost ?? _savedPairedServer?.wanHost,
+        wanPort: activePeer.wanPort ?? _savedPairedServer?.wanPort,
       );
 
       if (transferred > 0 && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✓ Automatically backed up $transferred new photo(s) to ${targetPeer.name}!'),
+            content: Text('✓ Automatically backed up $transferred new photo(s) to ${activePeer.name}!'),
             backgroundColor: GooglePhotosColors.green,
           ),
         );
@@ -1468,25 +1598,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _syncCameraRollToConnectedPeer() async {
-    if (_nearbyPeers.isEmpty) {
+    if (_nearbyPeers.isEmpty && _savedPairedServer == null) {
       await _scanNearby();
     }
 
-    if (_nearbyPeers.isEmpty) {
+    final targetPeer = _nearbyPeers.isNotEmpty
+        ? _nearbyPeers.firstWhere(
+            (p) => p.deviceType.toLowerCase() == 'android' || p.name.toLowerCase().contains('oneplus') || p.deviceType.toLowerCase() == 'pc',
+            orElse: () => _nearbyPeers.first,
+          )
+        : _savedPairedServer;
+
+    if (targetPeer == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No backup server found on Wi-Fi yet. Make sure your Android server / PC has P2Pme running.'),
+            content: Text('No backup server found. Pair with your server in Tab 2 or connect via Wi-Fi/cable.'),
           ),
         );
       }
       return;
     }
-
-    final targetPeer = _nearbyPeers.firstWhere(
-      (p) => p.deviceType.toLowerCase() == 'android' || p.name.toLowerCase().contains('oneplus') || p.deviceType.toLowerCase() == 'pc',
-      orElse: () => _nearbyPeers.first,
-    );
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1494,11 +1626,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     }
 
-    final token = targetPeer.authToken ?? _hubSecretKey ?? _webDropSessionToken;
+    final token = targetPeer.authToken ?? _savedPairedServer?.authToken ?? _hubSecretKey ?? _webDropSessionToken;
     final transferred = await CameraBackupService.instance.syncPendingToPeer(
       peerIp: targetPeer.ip,
       peerPort: targetPeer.port,
       token: token,
+      wanHost: targetPeer.wanHost ?? _savedPairedServer?.wanHost,
+      wanPort: targetPeer.wanPort ?? _savedPairedServer?.wanPort,
       onProgress: (cur, tot, filename) {
         if (mounted) setState(() {});
       },
@@ -1519,8 +1653,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       final interfaces = await NetworkInterface.list();
       String? fallbackIp;
+      String? detectedUsbIp;
       for (var iface in interfaces) {
         final name = iface.name.toLowerCase();
+        final isUsbInterface = name.contains('rndis') ||
+            name.contains('usb') ||
+            name.contains('ncm') ||
+            name.contains('cdc') ||
+            name.contains('bridge100');
         final isVirtualTunnel = name.startsWith('utun') ||
             name.startsWith('tun') ||
             name.startsWith('tap') ||
@@ -1532,13 +1672,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               !addr.isLoopback &&
               !addr.address.startsWith('10.0.2.') &&
               !addr.address.startsWith('127.')) {
+            if (isUsbInterface) {
+              detectedUsbIp = addr.address;
+            }
             if (!isVirtualTunnel) {
               if (addr.address.startsWith('192.168.') ||
                   name.contains('wlan') ||
                   name.contains('wi-fi') ||
                   name.contains('en0') ||
                   name.contains('eth')) {
-                setState(() => _localIpAddress = addr.address);
+                if (mounted) {
+                  setState(() {
+                    _localIpAddress = addr.address;
+                    if (detectedUsbIp != null) {
+                      _usbCableIp = detectedUsbIp;
+                      _isUsbCableConnected = true;
+                    }
+                  });
+                }
                 return;
               }
               fallbackIp ??= addr.address;
@@ -1548,8 +1699,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         }
       }
-      if (fallbackIp != null && mounted) {
-        setState(() => _localIpAddress = fallbackIp);
+      if (mounted) {
+        setState(() {
+          if (fallbackIp != null) _localIpAddress = fallbackIp;
+          if (detectedUsbIp != null) {
+            _usbCableIp = detectedUsbIp;
+            _isUsbCableConnected = true;
+          }
+        });
       }
     } catch (_) {}
   }
@@ -2831,6 +2988,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     'Direct Address: $serverUrl',
                     style: const TextStyle(fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.w600),
                   ),
+                  if (_isUsbCableConnected && _usbCableIp != null) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: GooglePhotosColors.blue.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.usb_rounded, color: GooglePhotosColors.blue, size: 14),
+                          const SizedBox(width: 6),
+                          Text(
+                            '⚡ USB Cable: http://$_usbCableIp:$_webDropPort',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.blue, fontFamily: 'monospace'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (_serverRemoteWanUrl != null && _serverRemoteWanUrl!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Remote / WAN: $_serverRemoteWanUrl',
+                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF12B5CB)),
+                    ),
+                  ],
                   const SizedBox(height: 4),
                   Text(
                     'Hub Secret Key: ${_hubSecretKey != null ? "${_hubSecretKey!.substring(0, 12)}••••••••" : "Generating..."}',
@@ -2869,6 +3054,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ],
                   ),
                   const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.public_rounded, size: 14),
+                          label: Text(
+                            _serverRemoteWanUrl != null && _serverRemoteWanUrl!.isNotEmpty ? 'WAN Endpoint' : 'Set Remote WAN URL',
+                            style: const TextStyle(fontSize: 11),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onPressed: _promptSetServerWanUrl,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.usb_rounded, size: 14),
+                          label: const Text('Cable Guide', style: TextStyle(fontSize: 11)),
+                          onPressed: _showUsbCableGuide,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
@@ -2893,7 +3102,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       child: QrImageView(
                         data: _hubSecretKey != null && _hubSecretKey!.isNotEmpty
-                            ? '$serverUrl?key=$_hubSecretKey'
+                            ? '$serverUrl?key=$_hubSecretKey${_serverRemoteWanUrl != null && _serverRemoteWanUrl!.isNotEmpty ? '&wan=${Uri.encodeComponent(_serverRemoteWanUrl!)}' : ''}'
                             : serverUrl,
                         version: QrVersions.auto,
                         size: 140.0,
@@ -2916,6 +3125,105 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           // Background Service & Speed card
           _buildBackgroundAndSpeedCard(),
+        ],
+      ),
+    );
+  }
+
+  void _promptSetServerWanUrl() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final controller = TextEditingController(text: _serverRemoteWanUrl ?? '');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.public_rounded, color: GooglePhotosColors.blue),
+            SizedBox(width: 10),
+            Text('Remote / WAN Endpoint'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter your home hub\'s Tailscale mesh IP (e.g. 100.85.120.44:45455) or custom DDNS domain to enable backup from 5G / cellular anywhere.',
+              style: TextStyle(fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                hintText: 'e.g. 100.85.120.44:45455 or https://...',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _saveServerWanUrl('');
+            },
+            child: const Text('Clear', style: TextStyle(color: Colors.grey)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: GooglePhotosColors.blue),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _saveServerWanUrl(controller.text.trim());
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showUsbCableGuide() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Row(
+          children: [
+            Icon(Icons.usb_rounded, color: GooglePhotosColors.blue),
+            SizedBox(width: 10),
+            Text('⚡ Direct USB Cable Transfer'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Transfer gigabytes at wire speed (35-400+ MB/s) with 0% wireless packet loss and ZERO Wi-Fi required!',
+                style: TextStyle(fontSize: 13, color: isDark ? Colors.grey.shade300 : Colors.grey.shade800, height: 1.4),
+              ),
+              const SizedBox(height: 14),
+              const Text('📱 Phone to Phone (e.g. iPhone ↔ Pixel):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              const Text('1. Connect both phones with a USB-C to USB-C or Lightning cable.\n2. Turn on USB Tethering (Android Settings → Hotspot → USB tethering) or Personal Hotspot over USB (iPhone).\n3. P2Pme automatically detects the direct wired link and transfers at hardware speed.', style: TextStyle(fontSize: 12, height: 1.4)),
+              const SizedBox(height: 14),
+              const Text('💻 Phone to PC (Windows / Mac / Linux):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              const Text('1. Connect phone to PC via USB cable.\n2. Enable USB tethering on your phone.\n3. Open P2Pme on PC or visit http://127.0.0.1:45455 in your browser for instant wired backup.', style: TextStyle(fontSize: 12, height: 1.4)),
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: GooglePhotosColors.blue),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got It'),
+          ),
         ],
       ),
     );
@@ -3138,7 +3446,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                         const SizedBox(height: 20),
 
-                        // Section 1: WebRTC P2P Direct
+                        // Section 1: Direct USB Cable Transfer
+                        _buildConnectionMethodCard(
+                          isDark: isDark,
+                          badge: '⚡ Direct Wire Speed (Offline)',
+                          badgeColor: GooglePhotosColors.blue,
+                          title: 'Direct USB Cable Transfer (USB-to-USB & USB-to-PC)',
+                          description: 'Connect two phones directly (e.g. iPhone to Pixel XL) or phone to PC with a USB cable. Zero Wi-Fi required, zero wireless packet loss, 35-400+ MB/s wire speed, and keeps your devices charged.',
+                          steps: [
+                            'Connect both devices using a USB-C to USB-C or Lightning cable.',
+                            'On Android, turn on USB Tethering (Settings → Network → Hotspot & tethering → USB tethering). On iPhone, enable Personal Hotspot over USB.',
+                            'P2Pme automatically detects the hardware wired interface and streams files at full copper bus speeds.',
+                          ],
+                          platformIcons: [
+                            BrandIcons.apple(size: 16, color: isDark ? Colors.white : Colors.black87),
+                            const SizedBox(width: 6),
+                            BrandIcons.android(size: 16),
+                            const SizedBox(width: 6),
+                            BrandIcons.windows(size: 16),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Section 2: WebRTC P2P Direct
                         _buildConnectionMethodCard(
                           isDark: isDark,
                           badge: '🌐 Zero-Install Direct P2P',
@@ -4148,9 +4478,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildConnectedServerCard(bool isDark) {
-    final hasPeer = _nearbyPeers.isNotEmpty;
-    final serverName = hasPeer ? _nearbyPeers.first.name : null;
-    final serverIp = hasPeer ? _nearbyPeers.first.ip : null;
+    final livePeer = _nearbyPeers.cast<NearbyPeer?>().firstWhere(
+      (p) => p != null && (p.isPaired || (_savedPairedServer != null && (p.ip == _savedPairedServer!.ip || p.name == _savedPairedServer!.name || (p.wanHost != null && p.wanHost == _savedPairedServer!.wanHost)))),
+      orElse: () => _nearbyPeers.isNotEmpty ? _nearbyPeers.first : null,
+    );
+
+    final displayPeer = livePeer ?? _savedPairedServer;
+    final isPaired = displayPeer != null;
+    final isLiveConnected = livePeer != null;
+    final serverName = displayPeer?.name ?? 'No Backup Server Connected';
+    final serverIp = displayPeer?.ip ?? '';
+    final serverPort = displayPeer?.port ?? _webDropPort;
+    final wanHost = displayPeer?.wanHost;
+
+    // Determine connection badge & tier
+    Color statusColor = isLiveConnected ? GooglePhotosColors.green : const Color(0xFFF9AB00);
+    String statusBadgeText;
+    IconData statusIcon = Icons.dns_outlined;
+
+    if (isLiveConnected && displayPeer != null) {
+      if (_isUsbCableConnected && (displayPeer.ip == _usbCableIp || displayPeer.ip.startsWith('192.168.42.') || displayPeer.ip.startsWith('172.20.10.'))) {
+        statusBadgeText = '⚡ Connected (USB Cable)';
+        statusColor = GooglePhotosColors.blue;
+        statusIcon = Icons.usb_rounded;
+      } else if (wanHost != null && displayPeer.ip == wanHost) {
+        statusBadgeText = '🌐 Connected (Mesh / WAN)';
+        statusColor = const Color(0xFF12B5CB);
+        statusIcon = Icons.public_rounded;
+      } else {
+        statusBadgeText = '✓ Connected (Wi-Fi)';
+        statusColor = GooglePhotosColors.green;
+        statusIcon = Icons.wifi_rounded;
+      }
+    } else if (isPaired) {
+      statusBadgeText = '⏳ Waiting for connection / Cellular';
+      statusColor = const Color(0xFFF9AB00);
+      statusIcon = Icons.cloud_queue_rounded;
+    } else {
+      statusBadgeText = '';
+    }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -4159,8 +4525,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: hasPeer
-              ? GooglePhotosColors.green.withValues(alpha: 0.5)
+          color: isPaired
+              ? statusColor.withValues(alpha: 0.5)
               : (isDark ? const Color(0xFF3C4043) : const Color(0xFFE8EAED)),
         ),
       ),
@@ -4170,12 +4536,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: hasPeer
-                  ? GooglePhotosColors.green.withValues(alpha: 0.15)
+              backgroundColor: isPaired
+                  ? statusColor.withValues(alpha: 0.15)
                   : (isDark ? const Color(0xFF303134) : Colors.grey.shade100),
               child: Icon(
-                hasPeer ? Icons.dns_rounded : Icons.dns_outlined,
-                color: hasPeer ? GooglePhotosColors.green : Colors.grey,
+                isPaired ? statusIcon : Icons.dns_outlined,
+                color: isPaired ? statusColor : Colors.grey,
                 size: 20,
               ),
             ),
@@ -4184,23 +4550,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    hasPeer ? 'Backup Destination: $serverName' : 'No Backup Server Connected',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      color: hasPeer
-                          ? (isDark ? Colors.green.shade300 : Colors.green.shade800)
-                          : (isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124)),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          isPaired ? 'Backup Destination: $serverName' : 'No Backup Server Connected',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: isPaired
+                                ? (isDark ? Colors.white : const Color(0xFF202124))
+                                : (isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124)),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  if (isPaired) ...[
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            statusBadgeText,
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    hasPeer
-                        ? '$serverIp:45455 • Continuous auto-backup destination'
-                        : 'Connect to your home phone or PC to back up photos automatically.',
-                    style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368)),
-                  ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '$serverIp:$serverPort${wanHost != null && wanHost.isNotEmpty ? ' • WAN: $wanHost' : ''}',
+                      style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368)),
+                    ),
+                  ] else ...[
+                    Text(
+                      'Connect to your home phone or PC to back up photos automatically.',
+                      style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368)),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -4208,33 +4602,121 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton.outlined(
-                  tooltip: 'Scan Server QR',
-                  icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
-                  style: IconButton.styleFrom(
-                    foregroundColor: GooglePhotosColors.blue,
-                    side: BorderSide(color: GooglePhotosColors.blue.withValues(alpha: 0.5)),
-                    padding: const EdgeInsets.all(7),
-                    minimumSize: const Size(34, 34),
+                if (isPaired) ...[
+                  IconButton.outlined(
+                    tooltip: 'Reconnect / Ping Server',
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    style: IconButton.styleFrom(
+                      foregroundColor: GooglePhotosColors.blue,
+                      side: BorderSide(color: GooglePhotosColors.blue.withValues(alpha: 0.5)),
+                      padding: const EdgeInsets.all(7),
+                      minimumSize: const Size(34, 34),
+                    ),
+                    onPressed: () async {
+                      final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+                      await _probeIp(client, serverIp, targetPort: serverPort, authToken: displayPeer.authToken, wanHost: wanHost);
+                      if (wanHost != null && wanHost.isNotEmpty) {
+                        await _probeIp(client, wanHost, targetPort: displayPeer.wanPort ?? serverPort, authToken: displayPeer.authToken, wanHost: wanHost);
+                      }
+                      if (mounted) setState(() {});
+                    },
                   ),
-                  onPressed: () => _openQrScanner(),
-                ),
-                const SizedBox(width: 6),
-                FilledButton.tonal(
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                    minimumSize: const Size(0, 32),
+                  const SizedBox(width: 6),
+                  PopupMenuButton<String>(
+                    tooltip: 'Server Options',
+                    icon: const Icon(Icons.more_vert, size: 18),
+                    onSelected: (val) {
+                      if (val == 'change') {
+                        _showConnectServerModal();
+                      } else if (val == 'unpair') {
+                        _promptUnpairServer();
+                      }
+                    },
+                    itemBuilder: (ctx) => [
+                      const PopupMenuItem(
+                        value: 'change',
+                        child: Row(
+                          children: [
+                            Icon(Icons.swap_horiz, size: 16),
+                            SizedBox(width: 8),
+                            Text('Change Server', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'unpair',
+                        child: Row(
+                          children: [
+                            Icon(Icons.link_off, size: 16, color: GooglePhotosColors.red),
+                            SizedBox(width: 8),
+                            Text('Unpair Server', style: TextStyle(fontSize: 12, color: GooglePhotosColors.red)),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  onPressed: _showConnectServerModal,
-                  child: Text(
-                    hasPeer ? 'Change' : '+ Connect',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ] else ...[
+                  IconButton.outlined(
+                    tooltip: 'Scan Server QR',
+                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                    style: IconButton.styleFrom(
+                      foregroundColor: GooglePhotosColors.blue,
+                      side: BorderSide(color: GooglePhotosColors.blue.withValues(alpha: 0.5)),
+                      padding: const EdgeInsets.all(7),
+                      minimumSize: const Size(34, 34),
+                    ),
+                    onPressed: () => _openQrScanner(),
                   ),
-                ),
+                  const SizedBox(width: 6),
+                  FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                      minimumSize: const Size(0, 32),
+                    ),
+                    onPressed: _showConnectServerModal,
+                    child: const Text(
+                      '+ Connect',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _promptUnpairServer() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.link_off_rounded, color: GooglePhotosColors.red),
+            SizedBox(width: 10),
+            Text('Unpair Backup Server?'),
+          ],
+        ),
+        content: const Text(
+          'Disconnecting will stop automated camera roll backups to this server until you pair again. Existing backed-up photos on the server will remain untouched.',
+          style: TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: GooglePhotosColors.red),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _unpairServer();
+            },
+            child: const Text('Unpair'),
+          ),
+        ],
       ),
     );
   }

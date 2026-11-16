@@ -63,6 +63,20 @@
   * **Authorization Isolation:** Server Hub secret tokens extracted from QR codes are scoped exclusively to the target peer and never leaked across other network interfaces or third-party servers.
   * **Zero Cloud Intermediaries:** Device pairing handshakes occur directly over the local network via peer-to-peer HTTP/WebSockets with zero telemetry or cloud logging.
 
+### H. Direct USB Cable & Link-Local Network Isolation
+* **Risk:** Connecting untrusted hardware over USB tethering or exposing services to hostile interfaces.
+* **Mitigation:**
+  * **Cryptographic Token Enforcement on All Adapters:** P2Pme binds to wildcard sockets to service USB CDC-NCM / RNDIS links, but enforces the exact same 256-bit CSPRNG authorization secret on USB connections as on Wi-Fi and WAN.
+  * **Isolated Subnet Sandboxing:** USB tethering assigns private link-local subnets (e.g. `192.168.42.0/24` or `172.20.10.0/28`) that do not bridge to wide area networks or route external traffic without explicit host forwarding.
+  * **Physical Wire Guarantee:** Cable transfers are physically shielded from airborne radio sniffing and packet interception.
+
+### I. Remote WAN & Encrypted Mesh (Tailscale/WireGuard) Boundaries
+* **Risk:** Exposure of server endpoints when configuring external WAN URLs or operating across public cellular networks.
+* **Mitigation:**
+  * **Encrypted Mesh Overlays:** P2Pme strongly recommends overlay networks (Tailscale, WireGuard, Netbird) where all packets are end-to-end encrypted with Noise/ChaCha20-Poly1305 before leaving the device.
+  * **Strict Key Authentication:** WAN requests require the identical 256-bit server token (`?key=...` or `X-P2Pme-Key`). Unauthenticated probes are dropped immediately with 403 Forbidden without exposing filesystem paths.
+  * **Constant-Time Verification:** Server token matching is performed using constant-time string comparisons to eliminate timing side-channel exploits.
+
 ---
 
 ## 3. Reporting a Vulnerability

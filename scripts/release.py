@@ -156,7 +156,7 @@ def main():
     else:
         log(f"Waiting for GitHub Actions macOS runner to build genuine iOS IPA for tag v{new_version}...")
         ipa_artifact_id = None
-        for attempt in range(40): # up to ~6 minutes
+        for attempt in range(80): # up to ~13 minutes
             time.sleep(10)
             req = urllib.request.Request('https://api.github.com/repos/MizopaRalte/p2pme/actions/runs', headers=headers)
             runs_data = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))

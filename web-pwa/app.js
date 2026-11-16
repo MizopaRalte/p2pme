@@ -884,7 +884,7 @@
   };
 
   window.switchInfoTab = function(idx) {
-    const tabs = [1, 2, 3, 4, 5];
+    const tabs = [1, 2, 3, 4, 5, 6];
     tabs.forEach(t => {
       const btn = document.getElementById('infoTabBtn' + t);
       const content = document.getElementById('infoTabContent' + t);
@@ -904,6 +904,7 @@
       else if (idx === 3) activeBtn.style.background = '#0284C7';
       else if (idx === 4) activeBtn.style.background = '#EA4335';
       else if (idx === 5) activeBtn.style.background = '#5F6368';
+      else if (idx === 6) activeBtn.style.background = '#1A73E8';
       activeBtn.style.color = 'white';
       activeBtn.style.fontWeight = '700';
     }

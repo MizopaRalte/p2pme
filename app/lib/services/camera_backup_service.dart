@@ -141,7 +141,7 @@ class CameraBackupService {
   }
 
   /// Scan camera roll and return list of unsynced items
-  Future<List<CameraAssetItem>> scanCameraRoll({int limit = 500}) async {
+  Future<List<CameraAssetItem>> scanCameraRoll({int limit = 0}) async {
     _state = CameraBackupState.checking;
     _stateController.add(_state);
 
@@ -255,6 +255,8 @@ class CameraBackupService {
     required String peerIp,
     required int peerPort,
     required String token,
+    String? wanHost,
+    int? wanPort,
     Function(int current, int total, String filename)? onProgress,
   }) async {
     _isSyncPaused = false;
@@ -268,6 +270,25 @@ class CameraBackupService {
     _state = CameraBackupState.syncing;
     _stateController.add(_state);
     int transferredCount = 0;
+
+    String activeHost = peerIp;
+    int activePort = peerPort;
+
+    // Fast probe to verify if LAN peerIp is directly reachable. If not and wanHost is provided, switch to WAN
+    if (wanHost != null && wanHost.isNotEmpty && wanHost != peerIp) {
+      try {
+        final probeClient = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+        final req = await probeClient.getUrl(Uri.parse('http://$peerIp:$peerPort/api/info'));
+        final resp = await req.close();
+        if (resp.statusCode != HttpStatus.ok) {
+          activeHost = wanHost;
+          activePort = wanPort ?? peerPort;
+        }
+      } catch (_) {
+        activeHost = wanHost;
+        activePort = wanPort ?? peerPort;
+      }
+    }
 
     for (int i = 0; i < pending.length; i++) {
       if (_isSyncPaused) {
@@ -301,63 +322,72 @@ class CameraBackupService {
       final uploadFile = File(filePathToUpload);
       if (!await uploadFile.exists()) continue;
 
-      try {
-        final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
-        final url = Uri.parse('http://$peerIp:$peerPort/upload?name=${Uri.encodeComponent(item.filename)}&token=$token');
-        final req = await client.postUrl(url);
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+          final url = Uri.parse('http://$activeHost:$activePort/upload?name=${Uri.encodeComponent(item.filename)}&token=$token');
+          final req = await client.postUrl(url);
 
-        final len = await uploadFile.length();
-        req.headers.contentLength = len;
-        req.headers.contentType = ContentType.binary;
+          final len = await uploadFile.length();
+          req.headers.contentLength = len;
+          req.headers.contentType = ContentType.binary;
 
-        int bytesSentThisFile = 0;
-        final Stopwatch sampleWatch = Stopwatch()..start();
-        int bytesSinceSample = 0;
+          int bytesSentThisFile = 0;
+          final Stopwatch sampleWatch = Stopwatch()..start();
+          int bytesSinceSample = 0;
 
-        await for (final chunk in uploadFile.openRead()) {
-          if (_isSyncPaused) {
-            req.abort();
-            break;
-          }
-          req.add(chunk);
-          bytesSentThisFile += chunk.length;
-          bytesSinceSample += chunk.length;
-
-          if (sampleWatch.elapsedMilliseconds >= 250) {
-            final double seconds = sampleWatch.elapsedMicroseconds / 1000000.0;
-            if (seconds > 0) {
-              _currentSpeedBytesPerSec = bytesSinceSample / seconds;
+          await for (final chunk in uploadFile.openRead()) {
+            if (_isSyncPaused) {
+              req.abort();
+              break;
             }
-            sampleWatch.reset();
-            bytesSinceSample = 0;
-            _currentFileProgressRatio = len > 0 ? (bytesSentThisFile / len).clamp(0.0, 1.0) : 0.0;
-            onProgress?.call(_currentSyncIndex, pending.length, item.filename);
-            _stateController.add(_state);
-          }
-        }
+            req.add(chunk);
+            bytesSentThisFile += chunk.length;
+            bytesSinceSample += chunk.length;
 
-        if (!_isSyncPaused) {
-          final resp = await req.close();
-          if (resp.statusCode == HttpStatus.ok) {
-            _syncedAssetIds.add(item.id);
-            transferredCount++;
-            _lastSyncTime = DateTime.now();
-            await _saveStorage();
-          } else {
-            debugPrint('[CameraBackup] Peer returned status ${resp.statusCode} for ${item.filename}');
+            if (sampleWatch.elapsedMilliseconds >= 250) {
+              final double seconds = sampleWatch.elapsedMicroseconds / 1000000.0;
+              if (seconds > 0) {
+                _currentSpeedBytesPerSec = bytesSinceSample / seconds;
+              }
+              sampleWatch.reset();
+              bytesSinceSample = 0;
+              _currentFileProgressRatio = len > 0 ? (bytesSentThisFile / len).clamp(0.0, 1.0) : 0.0;
+              onProgress?.call(_currentSyncIndex, pending.length, item.filename);
+              _stateController.add(_state);
+            }
+          }
+
+          if (!_isSyncPaused) {
+            final resp = await req.close();
+            if (resp.statusCode == HttpStatus.ok) {
+              _syncedAssetIds.add(item.id);
+              transferredCount++;
+              _lastSyncTime = DateTime.now();
+              await _saveStorage();
+              break;
+            } else {
+              debugPrint('[CameraBackup] Peer returned status ${resp.statusCode} for ${item.filename}');
+            }
+          }
+        } catch (e) {
+          debugPrint('[CameraBackup] Upload attempt ${attempt + 1} failed for ${item.filename} on $activeHost: $e');
+          _lastError = e.toString();
+          // If LAN failed and WAN is available, switch active endpoint to WAN and retry once
+          if (attempt == 0 && wanHost != null && wanHost.isNotEmpty && activeHost != wanHost) {
+            activeHost = wanHost;
+            activePort = wanPort ?? peerPort;
+            continue;
           }
         }
-        _currentFileProgressRatio = 0.0;
-      } catch (e) {
-        debugPrint('[CameraBackup] Upload failed for ${item.filename}: $e');
-        _lastError = e.toString();
-      } finally {
-        // Clean up temp export on iOS to keep sandbox small
-        if (isTempExport) {
-          try {
-            await uploadFile.delete();
-          } catch (_) {}
-        }
+        break;
+      }
+      _currentFileProgressRatio = 0.0;
+      // Clean up temp export on iOS to keep sandbox small
+      if (isTempExport) {
+        try {
+          await uploadFile.delete();
+        } catch (_) {}
       }
     }
 

@@ -59,22 +59,24 @@ flowchart TD
 
 ---
 
-## 3. The 4-Tier Multi-Network Transport
+## 3. The 5-Tier Multi-Network Transport Hierarchy
 
-To guarantee 100% connectivity between any two devices globally, P2Pme uses an adaptive multi-tier transport hierarchy:
+To guarantee 100% connectivity between any two devices globally—whether across physical cables, local Wi-Fi, cellular networks, or restricted corporate firewalls—P2Pme uses an adaptive multi-tier transport hierarchy:
 
 | Tier | Network Path | Mechanism | Latency / Speed | Offline? |
 | :--- | :--- | :--- | :--- | :--- |
+| **Tier 0** | **Direct USB Cable** | CDC-NCM / RNDIS USB Tethering / Hotspot point-to-point link | Sub-millisecond / Full USB wire-speed (100–480+ Mbps) | **Yes** (100% offline, 0% Wi-Fi) |
 | **Tier 1** | **Direct LAN** | mDNS + Multicast UDP discovery | Sub-millisecond / Full LAN wire-speed (1–10 Gbps) | **Yes** (100% offline) |
-| **Tier 2** | **Direct WAN (Router)** | UPnP / NAT-PMP port mapping | Internet ping / Full ISP line speed | No |
+| **Tier 2** | **Direct WAN / Mesh** | Tailscale / WireGuard / IPv6 / Router Port Forward | Internet ping / Full ISP & 5G line speed | No |
 | **Tier 3** | **Direct WAN (Punched)** | STUN + UDP Hole Punching | Direct UDP path / Full ISP line speed | No |
-| **Tier 4** | **Encrypted Relay** | DERP packet forwarder | Proxied / Bandwidth capped by relay | No |
+| **Tier 4** | **Encrypted Relay** | DERP packet forwarder / Zero-Knowledge Relay | Proxied / Bandwidth capped by relay | No |
 
 ### Connection Fallback Lifecycle
-1. When two devices pair via an authentication ticket or QR code, both nodes announce themselves to the local subnet via mDNS while simultaneously contacting STUN.
-2. If both peers are on the same Wi-Fi, the connection locks to the LAN address for maximum bandwidth.
-3. If peers are on separate networks, STUN probes public IP/port candidates and initiates simultaneous UDP hole punching.
-4. If a carrier-grade symmetric NAT (such as mobile 5G) blocks the direct hole punch, both peers establish encrypted sessions with a DERP relay node. The relay sees only encrypted bytes (TLS 1.3 / Noise protocol) and cannot inspect content.
+1. **Physical Cable First (Tier 0):** If a USB-C or Lightning cable connects the two devices (with USB tethering enabled on mobile), P2Pme discovers the virtual CDC-NCM/RNDIS adapter and locks to the physical link-local socket, bypassing Wi-Fi entirely.
+2. **Local Wi-Fi Next (Tier 1):** When two devices pair via an authentication ticket or QR code, both nodes announce themselves to the local subnet via mDNS and UDP broadcast beacons. If both peers are on the same Wi-Fi, the connection locks to the LAN address for maximum bandwidth.
+3. **Mesh & Remote WAN Failover (Tier 2):** When a sender switches from home Wi-Fi to cellular (5G/LTE), local subnet pings fail. The client automatically fails over to the paired node's WAN/Mesh address (e.g. Tailscale IP or public domain) configured in the pairing ticket or manual remote dialog.
+4. **STUN & Hole Punching (Tier 3):** If peers are on separate uncoordinated networks, STUN probes public IP/port candidates and initiates simultaneous UDP hole punching.
+5. **Encrypted Relay (Tier 4):** If carrier-grade symmetric NAT (CGNAT) on mobile data blocks direct hole punches, peers communicate through an encrypted DERP relay session where data is protected by Noise/TLS 1.3.
 
 ---
 
@@ -199,6 +201,26 @@ P2Pme incorporates symmetric high-frequency sampling for wire-speed network obse
    * Streams incoming HTTP `/upload` request byte chunks directly into target files (`DCIM/Camera` or user-defined destination).
    * Computes incoming ingress velocity every 200ms based on chunk bytes ingested against total file content length.
    * Displays an active live ingestion card on Tab 3 with animated progress bar and throughput badge (`XX.X MB/s`).
+
+---
+
+## 10. Direct USB-to-USB Cable Transfer & Cellular Persistence Architecture
+
+### A. Point-to-Point USB Cable Networking (CDC-NCM / RNDIS)
+* When two devices are connected directly via a physical USB-C or Lightning cable (e.g. Phone-to-Phone, Phone-to-PC, or PC-to-PC), enabling USB Tethering on Android or Personal Hotspot via USB on iOS initializes a standard IEEE 802.3 Ethernet-over-USB network interface (`rndis0`, `usb0`, `ncm0`, or `cdc0`).
+* The OS automatically configures an isolated point-to-point link-local subnet (typically `192.168.42.0/24` on Android or `172.20.10.0/28` on iOS).
+* P2Pme binds to wildcard socket `0.0.0.0:45455`, allowing incoming traffic over the physical USB network interface without modifying host routing tables.
+* Interface inspection automatically flags physical cable adapters, surfacing an active `⚡ USB Cable Connected` status badge in the UI and routing traffic across the physical wire at speeds up to 110–480+ MB/s with zero wireless interference or packet drop.
+
+### B. Paired Server Persistence Across Cellular (5G/LTE) Transitions
+* When an iPhone or Android device leaves the home Wi-Fi network, previous implementations that evaluated pairing solely based on live LAN UDP broadcast presence (`_nearbyPeers.isNotEmpty`) inadvertently wiped the paired server card, resetting the UI to "No Backup Server Connected".
+* In P2Pme v1.1.0+, pairing state is written synchronously to local disk storage (`.paired_server`) storing the server's Node ID, Device Name, LAN IP, LAN Port, WAN Endpoint (if configured), and authentication secret token.
+* On app reboot or cellular handoff, the UI retains the paired server card with a clear connection indicator:
+  - `✓ Connected (Wi-Fi)`: Active LAN connection.
+  - `⚡ Connected (USB Cable)`: Direct physical wire link.
+  - `🌐 Connected (Mesh / WAN)`: Active Tailscale / WireGuard / Port-forwarded endpoint.
+  - `⏳ Waiting for connection / Cellular`: Server offline or peer is on mobile cellular data without an open WAN/Mesh route. Includes an instant 1-tap "Ping/Reconnect" button.
+
 
 
 
