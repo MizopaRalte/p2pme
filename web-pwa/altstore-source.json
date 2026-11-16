@@ -37,13 +37,31 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.0.6",
+          "buildVersion": "7",
+          "date": "2026-11-16",
+          "localizedDescription": "Zero-conflict cryptographic security: 1-tap regeneration and revocation for Server Hub Secret Keys (256-bit CSPRNG) and Folder Pairing Tickets (BLAKE3), with dynamic QR updates.",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.0.6.ipa",
+          "size": 7592350,
+          "sha256": "1e5d8482818c74845652395760ba83b1b34e9012f492cd78cd88b69b5fcb4d1c",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.0.5",
           "buildVersion": "6",
           "date": "2026-11-15",
           "localizedDescription": "Resilio-style Camera Roll continuous auto-backup on iOS, native PhotoKit integration, official Google Photos-themed iOS app icon, and 1-tap AltStore in-app update.",
           "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.0.5.ipa",
           "size": 7401965,
-          "minOSVersion": "14.0",
+          "minOSVersion": "15.0",
           "appPermissions": {
             "entitlements": [],
             "privacy": {
