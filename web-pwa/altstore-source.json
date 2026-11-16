@@ -37,6 +37,24 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.0.8",
+          "buildVersion": "10",
+          "date": "2026-11-16",
+          "localizedDescription": "Added 1-tap Pause & Resume button for sender backup, 14.8MB minified APK, and QR server pairing.",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.0.8.ipa",
+          "size": 7549330,
+          "sha256": "c7a6bc9a107042cbb9a6e87c63440fedd8acf68cd4a3d02dbbd370297153f527",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.0.7",
           "buildVersion": "9",
           "date": "2026-11-16",
