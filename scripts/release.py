@@ -296,7 +296,7 @@ def main():
 
     # Upload all release assets
     upload_url_base = f'https://uploads.github.com/repos/MizopaRalte/p2pme/releases/{rel_id}/assets'
-    assets_req = urllib.request.Request(upload_url_base, headers=headers)
+    assets_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/releases/{rel_id}/assets', headers=headers)
     existing_assets = {a['name']: a['id'] for a in json.loads(urllib.request.urlopen(assets_req).read().decode('utf-8'))}
 
     apk_sha_content = f"{apk_hash}  P2Pme.apk\n"
