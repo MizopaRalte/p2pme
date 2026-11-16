@@ -222,8 +222,26 @@ class CameraBackupService {
   bool _isSyncPaused = false;
   bool get isSyncPaused => _isSyncPaused;
 
+  double _currentSpeedBytesPerSec = 0.0;
+  double _currentFileProgressRatio = 0.0;
+  double get currentSpeedBytesPerSec => _currentSpeedBytesPerSec;
+  double get currentFileProgressRatio => _currentFileProgressRatio;
+
+  String get formattedSpeed {
+    if (_currentSpeedBytesPerSec <= 0) return '0.0 MB/s';
+    final mb = _currentSpeedBytesPerSec / (1024 * 1024);
+    if (mb >= 1.0) {
+      return '${mb.toStringAsFixed(1)} MB/s';
+    } else {
+      final kb = _currentSpeedBytesPerSec / 1024;
+      return '${kb.toStringAsFixed(0)} KB/s';
+    }
+  }
+
   void pauseSync() {
     _isSyncPaused = true;
+    _currentSpeedBytesPerSec = 0.0;
+    _currentFileProgressRatio = 0.0;
     _state = CameraBackupState.idle;
     _stateController.add(_state);
   }
@@ -291,17 +309,45 @@ class CameraBackupService {
         final len = await uploadFile.length();
         req.headers.contentLength = len;
         req.headers.contentType = ContentType.binary;
-        await req.addStream(uploadFile.openRead());
-        final resp = await req.close();
 
-        if (resp.statusCode == HttpStatus.ok) {
-          _syncedAssetIds.add(item.id);
-          transferredCount++;
-          _lastSyncTime = DateTime.now();
-          await _saveStorage();
-        } else {
-          debugPrint('[CameraBackup] Peer returned status ${resp.statusCode} for ${item.filename}');
+        int bytesSentThisFile = 0;
+        final Stopwatch sampleWatch = Stopwatch()..start();
+        int bytesSinceSample = 0;
+
+        await for (final chunk in uploadFile.openRead()) {
+          if (_isSyncPaused) {
+            req.abort();
+            break;
+          }
+          req.add(chunk);
+          bytesSentThisFile += chunk.length;
+          bytesSinceSample += chunk.length;
+
+          if (sampleWatch.elapsedMilliseconds >= 250) {
+            final double seconds = sampleWatch.elapsedMicroseconds / 1000000.0;
+            if (seconds > 0) {
+              _currentSpeedBytesPerSec = bytesSinceSample / seconds;
+            }
+            sampleWatch.reset();
+            bytesSinceSample = 0;
+            _currentFileProgressRatio = len > 0 ? (bytesSentThisFile / len).clamp(0.0, 1.0) : 0.0;
+            onProgress?.call(_currentSyncIndex, pending.length, item.filename);
+            _stateController.add(_state);
+          }
         }
+
+        if (!_isSyncPaused) {
+          final resp = await req.close();
+          if (resp.statusCode == HttpStatus.ok) {
+            _syncedAssetIds.add(item.id);
+            transferredCount++;
+            _lastSyncTime = DateTime.now();
+            await _saveStorage();
+          } else {
+            debugPrint('[CameraBackup] Peer returned status ${resp.statusCode} for ${item.filename}');
+          }
+        }
+        _currentFileProgressRatio = 0.0;
       } catch (e) {
         debugPrint('[CameraBackup] Upload failed for ${item.filename}: $e');
         _lastError = e.toString();
@@ -315,6 +361,8 @@ class CameraBackupService {
       }
     }
 
+    _currentSpeedBytesPerSec = 0.0;
+    _currentFileProgressRatio = 0.0;
     _pendingAssetsCount = (await scanCameraRoll()).length;
     _state = _pendingAssetsCount == 0 ? CameraBackupState.upToDate : CameraBackupState.idle;
     _stateController.add(_state);

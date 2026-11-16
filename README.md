@@ -33,6 +33,8 @@
 
 ### 🔄 2. Backup Tab: Continuous Resilio-Style Sync
 * **Instant Camera QR Server Pairing:** 1-tap connection to your 24/7 Server Hub. Tap "Scan Server QR Code" on your sending phone (e.g. iPhone) and point at the Server Hub screen (e.g. Android phone or PC). Automatically parses IP, port, and 256-bit CSPRNG security tokens for instantaneous zero-typing pairing.
+* **Real-time Wire-Speed Telemetry:** Live throughput monitoring directly on the backup card displaying real-time speed in `MB/s` alongside current file progress.
+* **1-Tap Pause & Resume:** Pause active backup transfers on demand at any time to preserve battery or bandwidth, and resume when ready without losing progress.
 * **1-Tap Camera Roll Auto-Backup:** Automatically tracks and replicates your photos/videos directly to your computer or backup server in full original quality.
 * **Persistent Auto-Reconnect:** Remembers paired server destinations across app restarts, resuming unattended background synchronization automatically.
 * **Storage-Saver Archive Mode:** Free up storage on your phone by deleting local photos—synced copies on your PC/server remain safe and untouched.
@@ -42,6 +44,7 @@
 
 ### 🖥️ 3. Server Tab: 24/7 Backup Hub & Receiver
 * **Turn Any Device into a Server:** Toggle 24/7 Backup Server mode to accept incoming drops and continuous backups with background keep-alive.
+* **Live Ingestion Telemetry & Speed Meter:** Displays real-time incoming transfer speeds (`MB/s`), active receiving file names, and dynamic progress bars for both server and sender.
 * **Custom Save Destination Folder:** Choose exactly where received files and folder backups land on disk (e.g. internal storage, external SD card, or desktop path).
 * **Direct Server Ticket & Dynamic QR Code:** Connect new client devices to your hub using a master server pairing code or direct LAN socket (`http://<ip>:45455`).
 * **1-Tap Zero-Conflict Key Regeneration:** Rotate your Server Hub Secret Key (256-bit CSPRNG) on demand with 1 tap. Immediately revokes older QR codes and browser links with zero server collisions.

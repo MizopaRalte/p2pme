@@ -364,6 +364,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _receivedFiles = 0;
   int _receivedBytes = 0;
 
+  // Real-time File Transfer Speed Telemetry
+  bool _isReceivingActive = false;
+  String? _receivingFileName;
+  double _receivingSpeedMBps = 0.0;
+  double _receivingProgressRatio = 0.0;
+
   final TextEditingController _pinInputController = TextEditingController();
   final TextEditingController _ticketInputController = TextEditingController();
   final TextEditingController _pairTicketController = TextEditingController();
@@ -529,8 +535,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 10;
-  String _currentVersionName = '1.0.8';
+  int _currentVersionCode = 11;
+  String _currentVersionName = '1.0.9';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -1879,12 +1885,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       final outFile = File('${destDir.path}${Platform.pathSeparator}$safeName');
       final sink = outFile.openWrite();
-      await sink.addStream(request);
+      final totalExpectedBytes = request.headers.contentLength;
+      int receivedThisFile = 0;
+      final Stopwatch sampleWatch = Stopwatch()..start();
+      int bytesSinceSample = 0;
+
+      if (mounted) {
+        setState(() {
+          _isReceivingActive = true;
+          _receivingFileName = safeName;
+          _receivingSpeedMBps = 0.0;
+          _receivingProgressRatio = 0.0;
+        });
+      }
+
+      await for (final chunk in request) {
+        sink.add(chunk);
+        receivedThisFile += chunk.length;
+        bytesSinceSample += chunk.length;
+
+        if (sampleWatch.elapsedMilliseconds >= 200) {
+          final double seconds = sampleWatch.elapsedMicroseconds / 1000000.0;
+          if (seconds > 0) {
+            final speed = (bytesSinceSample / seconds) / (1024 * 1024);
+            if (mounted) {
+              setState(() {
+                _receivingSpeedMBps = speed;
+                if (totalExpectedBytes > 0) {
+                  _receivingProgressRatio = (receivedThisFile / totalExpectedBytes).clamp(0.0, 1.0);
+                }
+              });
+            }
+          }
+          sampleWatch.reset();
+          bytesSinceSample = 0;
+        }
+      }
       await sink.close();
 
       final fileLen = await outFile.length();
       if (mounted) {
         setState(() {
+          _isReceivingActive = false;
+          _receivingSpeedMBps = 0.0;
+          _receivingProgressRatio = 0.0;
           _lastReceivedFromBrowser = safeName;
           _receivedFiles++;
           _receivedBytes += fileLen;
@@ -1892,7 +1936,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.green.shade700,
-            content: Text('Received from browser: $safeName (${(fileLen / (1024 * 1024)).toStringAsFixed(1)} MB)'),
+            content: Text('Received $safeName (${(fileLen / (1024 * 1024)).toStringAsFixed(1)} MB)'),
           ),
         );
       }
@@ -2440,10 +2484,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final len = await file.length();
         req.headers.contentLength = len;
         req.headers.contentType = ContentType.binary;
-        await req.addStream(file.openRead());
+        final Stopwatch sampleWatch = Stopwatch()..start();
+        int bytesSinceSample = 0;
+        double currentSpeedMBps = 0.0;
+
+        await for (final chunk in file.openRead()) {
+          req.add(chunk);
+          bytesSinceSample += chunk.length;
+
+          if (sampleWatch.elapsedMilliseconds >= 200) {
+            final double s = sampleWatch.elapsedMicroseconds / 1000000.0;
+            if (s > 0) currentSpeedMBps = (bytesSinceSample / s) / (1024 * 1024);
+            sampleWatch.reset();
+            bytesSinceSample = 0;
+          }
+        }
         final resp = await req.close();
         if (resp.statusCode == HttpStatus.ok) {
           sent++;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✓ Sent $fileName (${currentSpeedMBps > 0 ? "${currentSpeedMBps.toStringAsFixed(1)} MB/s" : "done"})'),
+                backgroundColor: GooglePhotosColors.green,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
         }
       } catch (e) {
         debugPrint('Direct drop upload failed for $fileName: $e');
@@ -2558,7 +2625,110 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+
+          // Live Transfer Speed & Ingestion Telemetry Card
+          if (_isReceivingActive || _receivedFiles > 0)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _isReceivingActive
+                    ? GooglePhotosColors.green.withValues(alpha: 0.12)
+                    : (isDark ? GooglePhotosColors.darkCard : GooglePhotosColors.lightCard),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _isReceivingActive
+                      ? GooglePhotosColors.green.withValues(alpha: 0.6)
+                      : (isDark ? GooglePhotosColors.darkBorder : GooglePhotosColors.lightBorder),
+                  width: _isReceivingActive ? 1.5 : 1.0,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _isReceivingActive
+                              ? GooglePhotosColors.green
+                              : (isDark ? const Color(0xFF303134) : Colors.grey.shade200),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          _isReceivingActive ? Icons.downloading_rounded : Icons.speed_rounded,
+                          color: _isReceivingActive ? Colors.white : Colors.grey,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _isReceivingActive ? 'Receiving File Transfer...' : 'Receiver Ingestion Status',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: _isReceivingActive
+                                    ? GooglePhotosColors.green
+                                    : (isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124)),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _isReceivingActive && _receivingFileName != null
+                                  ? 'Saving: $_receivingFileName'
+                                  : 'Total: $_receivedFiles files (${(_receivedBytes / (1024 * 1024)).toStringAsFixed(1)} MB) ingested',
+                              style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_isReceivingActive)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: GooglePhotosColors.green,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '${_receivingSpeedMBps.toStringAsFixed(1)} MB/s',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (_isReceivingActive) ...[
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: _receivingProgressRatio > 0 ? _receivingProgressRatio : null,
+                        minHeight: 6,
+                        backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.2),
+                        color: GooglePhotosColors.green,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(
+                          _receivingProgressRatio > 0 ? '${(_receivingProgressRatio * 100).toInt()}%' : 'Transferring...',
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                        const Spacer(),
+                        const Text('Direct Wi-Fi Speed', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          const SizedBox(height: 4),
 
           // Receiver Storage Destination Card
           Card(
@@ -4639,6 +4809,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ],
             ),
+            if (isSyncing) ...[
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: service.currentFileProgressRatio > 0 ? service.currentFileProgressRatio : null,
+                  minHeight: 6,
+                  backgroundColor: GooglePhotosColors.blue.withValues(alpha: 0.15),
+                  color: GooglePhotosColors.blue,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${(service.currentFileProgressRatio * 100).toInt()}% • ${service.currentSyncingFilename ?? ""}',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isDark ? Colors.grey.shade300 : Colors.grey.shade800),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: GooglePhotosColors.blue.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      service.formattedSpeed,
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.blue),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

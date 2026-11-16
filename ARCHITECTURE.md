@@ -185,5 +185,21 @@ flowchart LR
    * Scanning the server's QR code extracts the host IP, HTTP port (45455), and secret token (`?key=...`).
    * The client probes the server's `/api/info` endpoint, establishes the paired state, saves credentials to `.paired_server` for automated persistence, and triggers camera roll auto-backup.
 
+---
+
+## 9. Real-Time Transfer Speed & Ingestion Telemetry
+
+P2Pme incorporates symmetric high-frequency sampling for wire-speed network observability:
+
+1. **Sender-Side Measurement (`CameraBackupService` & Direct Beam):**
+   * Emits chunks across HTTP streams while maintaining a 200–250ms sampling timer (`Stopwatch`).
+   * Evaluates instantaneous wire throughput: `speedMBps = (deltaBytes / deltaSeconds) / (1024 * 1024)`.
+   * Drives real-time UI meters displaying current file throughput (e.g. `64.8 MB/s`), batch percentage, and dynamic Pause / Resume controls.
+2. **Receiver-Side Measurement (24/7 Server Hub & Ingestion Engine):**
+   * Streams incoming HTTP `/upload` request byte chunks directly into target files (`DCIM/Camera` or user-defined destination).
+   * Computes incoming ingress velocity every 200ms based on chunk bytes ingested against total file content length.
+   * Displays an active live ingestion card on Tab 3 with animated progress bar and throughput badge (`XX.X MB/s`).
+
+
 
 

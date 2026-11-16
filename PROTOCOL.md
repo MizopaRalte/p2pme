@@ -185,3 +185,27 @@ p2pme://folder?v=1&node=<NODE_ID>&folder=<FOLDER_ID>&access=rw&token=<BLAKE3_HAS
 * `ts`: Generation epoch timestamp in seconds.
 * Upon regeneration, the old `SecretSeed` nonce is replaced, immediately causing subsequent verification attempts with older tokens to fail.
 
+---
+
+## 8. Streaming Chunk & Throughput Telemetry Wire Sequence
+
+For continuous file transfers, P2Pme uses streaming HTTP chunking with synchronized client-server throughput sampling:
+
+```text
+Sender (Client)                                          Receiver (24/7 Hub)
+      |                                                         |
+      | --- POST /upload?name=<file>&token=<key> -------------> |
+      |     Headers: Content-Length, Content-Type: binary       | (Read Content-Length)
+      |                                                         |
+      | === [Chunk 1: 64 KB] =================================> | (Write chunk to sink)
+      | === [Chunk 2: 64 KB] =================================> | (Write chunk to sink)
+      |     (Sample timer: 200ms -> calculate MB/s)             | (Sample timer: 200ms -> calculate MB/s)
+      |     (Update Sender UI: 64.8 MB/s, progress bar)         | (Update Receiver UI: 64.8 MB/s, progress bar)
+      | === [Chunk N: final] =================================> | (Finalize file, flush sink)
+      |                                                         |
+      | <--- HTTP/1.1 200 OK (Transfer Complete) -------------- |
+```
+* **Real-time Velocity:** Measured over 200–250ms delta windows using high-precision monotonic timers.
+* **Pause Abort Semantics:** When the user taps "Pause Backup", the client issues `request.abort()` or finishes the active chunk cleanly, stopping the stream without corrupting state.
+
+
