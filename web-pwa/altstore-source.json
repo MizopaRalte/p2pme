@@ -37,6 +37,24 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.2.0",
+          "buildVersion": "14",
+          "date": "2026-11-16",
+          "localizedDescription": "Release v1.2.0: Unified settings persistence, native screenshot exclusion, receiver role isolation, real-time receiver storage telemetry, and HTTP 507 out-of-space auto-resume protocol.",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.2.0.ipa",
+          "size": 7618021,
+          "sha256": "dfe4611c75575aaf2c3266466d06e175dfeffd6e6183e749c581aceefa523acd",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.1.1",
           "buildVersion": "13",
           "date": "2026-11-16",
