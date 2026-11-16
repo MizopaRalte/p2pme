@@ -160,16 +160,23 @@ def main():
         run_status = run_obj['status']
         print(f"Run {run_id}: status={run_status}")
 
-        if run_status == 'completed':
-            # Check artifacts
+        # Check artifacts as soon as they become available
+        try:
             art_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/actions/runs/{run_id}/artifacts', headers=headers)
             art_data = json.loads(urllib.request.urlopen(art_req).read().decode('utf-8'))
             for a in art_data.get('artifacts', []):
                 if a['name'] == 'p2pme-ios-ipa':
                     ipa_artifact_id = a['id']
                     break
-            if ipa_artifact_id:
-                break
+        except Exception as e:
+            print(f"Error checking artifacts: {e}")
+
+        if ipa_artifact_id:
+            log(f"Found macOS-compiled iOS IPA artifact (ID: {ipa_artifact_id})!")
+            break
+
+        if run_status == 'completed':
+            break
 
     if not ipa_artifact_id:
         error("Timed out waiting for macOS cloud runner to produce p2pme-ios-ipa artifact.")
