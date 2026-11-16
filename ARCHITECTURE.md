@@ -123,6 +123,11 @@ P2Pme is architected to operate without mandatory app store monopolies, supporti
 * **Distribution:** Direct release APK (`P2Pme.apk` targeted at `arm64-v8a` and universal ABI).
 * **In-App Update Checker:** On startup or user request, the application queries `https://p2pme.pages.dev/version.json`. If a higher `version_code` is detected, a non-intrusive banner notifies the user with a 1-tap download and update link.
 
+### D. iOS Native Application & AltStore Source
+* **Distribution:** Genuine macOS-compiled `.ipa` (`P2Pme.ipa` bundle ID `net.p2pme.p2pmeApp`).
+* **AltStore / SideStore Integration:** Official repository source published at `https://p2pme.pages.dev/altstore-source.json`. Supports 1-tap in-app install, source updates, and background profile refreshes.
+* **macOS Cloud CI/CD:** Because compiling iOS AOT Mach-O binaries requires Xcode and macOS, cloud automation via GitHub Actions (`.github/workflows/build-release.yml`) builds and packages the genuine IPA on `macos-latest` runners whenever `main` is updated.
+
 ---
 
 ## 7. Nearby Wi-Fi Discovery & Pairing
@@ -145,5 +150,36 @@ sequenceDiagram
 1. **UDP Broadcast Beacon:** Nodes on the local Wi-Fi subnet broadcast discovery packets on UDP port `42424` containing node name, endpoint, and dynamic session token.
 2. **Immediate 1-Tap Connection:** Nearby devices appear instantly in the UI with signal and IP metadata. Tapping connects directly via LAN wire-speed.
 3. **Dynamic IP Tolerance:** Device IP addresses (e.g., `192.168.x.x`) assigned by DHCP can change dynamically; the beacon protocol re-advertises new network endpoints automatically without requiring manual re-configuration.
+
+---
+
+## 8. Zero-Conflict Cryptographic Key & Ticket Rotation
+
+To prevent credential stagnation, unauthorized hub access, or pairing ticket collisions, P2Pme implements an on-demand cryptographic rotation architecture:
+
+```mermaid
+flowchart LR
+    subgraph Hub_Rotation ["Server Hub Rotation (Tab 3)"]
+        OldKey["Old Key: abc1..."] -->|"1-Tap Rotate"| CSPRNG["256-bit CSPRNG Generator"]
+        CSPRNG --> NewKey["New Key: 9f8e..."]
+        NewKey --> Invalidate["Revoke Old Key (403 Forbidden)"]
+        NewKey --> DynamicQR["Repaint Dynamic QR & URL (?key=...)"]
+    end
+
+    subgraph Ticket_Rotation ["Folder Ticket Rotation (Tab 2)"]
+        OldTicket["Old Ticket"] -->|"1-Tap Regenerate"| BLAKE3["BLAKE3(NodeID + FolderID + Nonce)"]
+        BLAKE3 --> NewTicket["New Base64-URL Signed Ticket"]
+        NewTicket --> QRRefresh["Update Stateful QR Modal"]
+    end
+```
+
+1. **Server Hub Secret (Tab 3):**
+   * Generated using cryptographically secure random values (`Random.secure()` / `crypto.getRandomValues()`).
+   * Encoded as 256-bit hex strings attached as query parameters (`?key=...`) to server URLs and embedded in QR codes.
+   * Rotating the key immediately revokes previous access: any upload attempt or WebDrop connection presenting the superseded key is rejected with HTTP 403 Forbidden.
+2. **Folder Pairing Tickets (Tab 2):**
+   * Encodes a signed, base64-url pairing ticket containing folder ID, node identity, access permissions, and a timestamp nonce.
+   * 1-tap regeneration re-derives the authentication token via BLAKE3, rendering prior tickets obsolete and updating the dynamic QR code in place.
+
 
 

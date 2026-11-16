@@ -49,6 +49,12 @@
   * No file names, folder structures, or device private keys are ever transmitted over broadcast beacons.
   * Any transfer connection requires the ephemeral token and mutual user acceptance or pairing ticket verification.
 
+### F. Key Rotation & Zero-Conflict Revocation
+* **Risk:** A client retaining an old QR code or WebDrop URL and continuing to access a Server Hub or synchronized folder after permissions should have expired.
+* **Mitigation:**
+  * **256-Bit CSPRNG Server Hub Secrets:** Hub secret keys are generated using system CSPRNG (`crypto.getRandomValues()` / `Random.secure()`).
+  * **1-Tap Dynamic Rotation:** Users can rotate the secret key on demand from Tab 3. Rotating the key updates the in-memory and persistent secret immediately, rendering all previously shared QR codes and browser links (`?key=...`) completely unusable (HTTP 403 Forbidden).
+  * **BLAKE3 Folder Ticket Invalidation:** Regenerating folder tickets re-derives the ticket with a new timestamp nonce, retiring older tickets to guarantee zero conflict.
 
 ---
 

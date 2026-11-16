@@ -139,3 +139,37 @@ sequenceDiagram
 * Incoming payloads are routed to the user's custom `_receiveDestination` path (e.g., `/storage/emulated/0/Download/P2Pme` or a custom user-created directory), rather than an immutable root folder.
 * Hub credentials (IP socket, 6-digit PIN, master secret key, and dynamic QR code) allow authorized devices to pair across LAN and WAN.
 
+---
+
+## 7. Dynamic Key & Ticket Wire Specification
+
+### A. Server Hub Secret Wire Authentication
+When connecting to a 24/7 Hub over HTTP or WebSockets:
+```http
+POST /upload?key=5f3d8a9e01bc47... HTTP/1.1
+Host: 192.168.1.100:45455
+X-P2Pme-Key: 5f3d8a9e01bc47...
+Content-Type: multipart/form-data
+```
+* **Validation:** The server compares the supplied `key` parameter against its active in-memory and persistent secret `_hubSecretKey`.
+* **Constant-Time Comparison:** Key verification uses constant-time byte comparisons to prevent timing side-channel attacks.
+* **Revocation Response:** If the secret key does not match (or has been regenerated), the server immediately returns:
+```json
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "Forbidden: Invalid or revoked server secret key",
+  "code": "AUTH_REVOKED"
+}
+```
+
+### B. Folder Pairing Ticket Serialization
+Folder tickets are encoded as compact Base64-URL strings:
+```text
+p2pme://folder?v=1&node=<NODE_ID>&folder=<FOLDER_ID>&access=rw&token=<BLAKE3_HASH>&ts=<TIMESTAMP>
+```
+* `token`: Derived from `BLAKE3(SecretSeed || FolderID || TimestampNonce)`.
+* `ts`: Generation epoch timestamp in seconds.
+* Upon regeneration, the old `SecretSeed` nonce is replaced, immediately causing subsequent verification attempts with older tokens to fail.
+

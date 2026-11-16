@@ -36,11 +36,13 @@
 * **Storage-Saver Archive Mode:** Free up storage on your phone by deleting local photos—synced copies on your PC/server remain safe and untouched.
 * **Folder Management & Instant Deletion:** Easily add folders (Camera Roll, WhatsApp Media, or any custom folder) and remove them from sync with 1 tap without losing local files.
 * **Folder QR & Ticket Sharing:** View and share pairing tickets or QR codes for any synced folder to pair directly with Windows (`p2pme join <ticket>`) or another phone.
+* **1-Tap Ticket Regeneration & Revocation:** Securely revoke and generate a brand-new BLAKE3 folder pairing ticket with a single tap, instantly retiring older tickets to guarantee zero conflict.
 
 ### 🖥️ 3. Server Tab: 24/7 Backup Hub & Receiver
 * **Turn Any Device into a Server:** Toggle 24/7 Backup Server mode to accept incoming drops and continuous backups with background keep-alive.
 * **Custom Save Destination Folder:** Choose exactly where received files and folder backups land on disk (e.g. internal storage, external SD card, or desktop path).
-* **Direct Server Ticket & QR Code:** Connect new client devices to your hub using a master server pairing code or direct LAN socket (`http://<ip>:45455`).
+* **Direct Server Ticket & Dynamic QR Code:** Connect new client devices to your hub using a master server pairing code or direct LAN socket (`http://<ip>:45455`).
+* **1-Tap Zero-Conflict Key Regeneration:** Rotate your Server Hub Secret Key (256-bit CSPRNG) on demand with 1 tap. Immediately revokes older QR codes and browser links with zero server collisions.
 * **Battery Optimization Management:** Visual indicator and 1-tap shortcut to disable OS battery throttling on Android for uninterrupted background replication.
 
 ---
@@ -63,7 +65,7 @@
 | **Android** | ✅ (`.apk` 1-tap install) | ✅ (Browser / Camera) | ✅ (Foreground Service) |
 | **Windows PC** | ✅ (`p2pme.exe` desktop daemon) | ✅ (Browser) | ✅ (Background Service) |
 | **Mac (macOS)** | ✅ (`.dmg` / `.app`) | ✅ (Safari / Chrome) | ✅ (Background Daemon) |
-| **iOS (iPhone/iPad)** | ✅ (PWA "Add to Home Screen") | ✅ (Native Camera + Safari) | Opportunistic |
+| **iOS (iPhone/iPad)** | ✅ (`.ipa` via AltStore & PWA) | ✅ (Native Camera + Safari) | ✅ (Background fetch & PhotoKit) |
 | **Linux** | ✅ (CLI & background service) | ✅ (Browser) | ✅ (systemd daemon) |
 
 ---
@@ -139,9 +141,11 @@ p2pme.exe share C:\Photos --backup
 ## Security & Privacy
 
 * **Zero Cloud Custody:** Your data never touches any intermediate cloud server or database.
-* **Mutual TLS 1.3 Encryption:** All QUIC network streams are encrypted end-to-end with forward secrecy.
+* **Mutual TLS 1.3 & DTLS 1.2 Encryption:** All QUIC network streams and WebRTC data channels are encrypted end-to-end with forward secrecy.
 * **BLAKE3 Content Integrity:** Every 256 KB chunk is cryptographically hashed and verified against bit rot and tampering.
 * **128-Bit Ephemeral Tokens:** Dynamic one-time secrets prevent local network port scanning or unauthorized uploads.
+* **256-Bit CSPRNG Hub Rotation:** 1-tap cryptographic rotation for Server Hub keys instantly revokes prior links and QR codes with zero server collision.
+* **BLAKE3 Folder Ticket Rotation:** On-demand folder ticket re-signing permanently retires compromised pairing tokens.
 
 ---
 
