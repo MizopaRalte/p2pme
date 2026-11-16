@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'services/p2p_bridge.dart';
 import 'services/camera_backup_service.dart';
+import 'screens/qr_scanner_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -528,8 +529,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 7;
-  String _currentVersionName = '1.0.6';
+  int _currentVersionCode = 8;
+  String _currentVersionName = '1.0.7';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -839,6 +840,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _checkBackgroundServiceStatus();
     _startWebDropServer();
     _startNearbyBeacon();
+    _loadPairedServer();
     CameraBackupService.instance.onNewAssetsDetected = () {
       if (mounted) {
         setState(() {});
@@ -1005,25 +1007,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final id = json['node_id']?.toString() ?? targetIp;
 
           if (mounted) {
+            final idx = _nearbyPeers.indexWhere((p) => p.ip == targetIp || p.id == id);
+            final existingToken = idx >= 0 ? _nearbyPeers[idx].authToken : null;
+            final effectiveToken = (authToken != null && authToken.isNotEmpty) ? authToken : existingToken;
+            final peer = NearbyPeer(
+              id: id,
+              name: name,
+              ip: targetIp,
+              port: port,
+              deviceType: type,
+              lastSeen: DateTime.now(),
+              authToken: effectiveToken,
+              isPaired: effectiveToken != null && effectiveToken.isNotEmpty,
+            );
             setState(() {
-              final idx = _nearbyPeers.indexWhere((p) => p.ip == targetIp || p.id == id);
-              final peer = NearbyPeer(
-                id: id,
-                name: name,
-                ip: targetIp,
-                port: port,
-                deviceType: type,
-                lastSeen: DateTime.now(),
-                authToken: authToken,
-                isPaired: authToken != null && authToken.isNotEmpty,
-              );
               if (idx >= 0) {
                 _nearbyPeers[idx] = peer;
               } else {
                 _nearbyPeers.add(peer);
-                _triggerAutoCameraBackup();
               }
             });
+            if (peer.isPaired) {
+              _savePairedServer(peer);
+            }
+            _triggerAutoCameraBackup();
           }
           return true;
         }
@@ -1142,6 +1149,223 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  Future<void> _savePairedServer(NearbyPeer peer) async {
+    try {
+      final baseDir = _getAppBaseDirectory();
+      final file = File('$baseDir${Platform.pathSeparator}.paired_server');
+      final data = jsonEncode({
+        'id': peer.id,
+        'name': peer.name,
+        'ip': peer.ip,
+        'port': peer.port,
+        'deviceType': peer.deviceType,
+        'authToken': peer.authToken,
+        'isPaired': peer.isPaired,
+      });
+      await file.parent.create(recursive: true);
+      await file.writeAsString(data);
+    } catch (e) {
+      debugPrint('Failed to save paired server: $e');
+    }
+  }
+
+  Future<void> _loadPairedServer() async {
+    try {
+      final baseDir = _getAppBaseDirectory();
+      final file = File('$baseDir${Platform.pathSeparator}.paired_server');
+      if (await file.exists()) {
+        final content = (await file.readAsString()).trim();
+        if (content.isNotEmpty) {
+          final map = jsonDecode(content) as Map<String, dynamic>;
+          final ip = map['ip'] as String?;
+          final port = map['port'] as int? ?? _webDropPort;
+          final authToken = map['authToken'] as String?;
+          if (ip != null && ip.isNotEmpty) {
+            final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+            await _probeIp(client, ip, targetPort: port, authToken: authToken);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to load paired server: $e');
+    }
+  }
+
+  Future<void> _openQrScanner({String? title, String? prompt}) async {
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (context) => QrScannerScreen(
+          title: title ?? 'Scan Server QR Code',
+          prompt: prompt ?? 'Point camera at the QR code displayed in Tab 3 (Server)',
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+
+    if (result == 'MANUAL_ENTRY') {
+      _promptConnectByIp();
+      return;
+    }
+
+    await _handleScannedQrCode(result);
+  }
+
+  Future<void> _handleScannedQrCode(String rawData) async {
+    final clean = rawData.trim();
+    if (clean.isEmpty) return;
+
+    // Case 1: Folder Pairing Ticket
+    if (clean.startsWith('p2pme-folder://') || clean.startsWith('p2pme-ticket://') || clean.contains('"sync_mode"')) {
+      final payload = clean.startsWith('p2pme-folder://')
+          ? clean.substring(15)
+          : (clean.startsWith('p2pme-ticket://') ? clean.substring(15) : clean);
+      final targetPath = Platform.isAndroid
+          ? '/storage/emulated/0/Download/P2Pme/SyncedFolder'
+          : (Platform.isIOS && Platform.environment['HOME'] != null
+              ? '${Platform.environment['HOME']}/Documents/P2Pme/SyncedFolder'
+              : './received_drop/SyncedFolder');
+      final res = P2PBridge.instance.syncTicket(payload, targetPath);
+      if (res == 0) {
+        setState(() {
+          _folders.add(SyncFolderItem(
+            id: 'joined-${DateTime.now().millisecondsSinceEpoch}',
+            name: 'Synced Peer Folder',
+            localPath: targetPath,
+            status: 'Synchronized',
+            connectionTier: 'DIRECT LAN',
+            syncMode: 'TWO-WAY REPLICATION',
+            fileCount: 0,
+            totalSizeMb: 0.0,
+            speedMb: 75.0,
+            ticket: payload,
+          ));
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✓ Successfully joined and paired peer folder!'),
+              backgroundColor: GooglePhotosColors.green,
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not import folder ticket.'),
+              backgroundColor: GooglePhotosColors.red,
+            ),
+          );
+        }
+      }
+      return;
+    }
+
+    // Case 2: Server Hub QR code or WebDrop session
+    final uri = Uri.tryParse(clean.startsWith('http://') || clean.startsWith('https://') ? clean : 'http://$clean');
+
+    // If it's a drop pin link
+    if (uri != null && uri.path.contains('/drop') && uri.queryParameters.containsKey('pin')) {
+      final pin = uri.queryParameters['pin'];
+      final host = uri.host.isNotEmpty ? uri.host : clean;
+      final port = uri.port != 0 ? uri.port : _webDropPort;
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      await _probeIp(client, host, targetPort: port);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✓ Connected to drop session (PIN $pin)!'),
+            backgroundColor: GooglePhotosColors.green,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Parse server host, port, and authToken
+    String host = clean;
+    int port = _webDropPort;
+    String? authToken;
+
+    if (uri != null) {
+      if (uri.host.isNotEmpty) {
+        host = uri.host;
+      }
+      if (uri.port != 0) {
+        port = uri.port;
+      }
+      if (uri.queryParameters.containsKey('key')) {
+        authToken = uri.queryParameters['key'];
+      }
+    }
+
+    // Cleanup host string if uri parser left protocols or paths
+    if (host.startsWith('http://')) host = host.substring(7);
+    if (host.startsWith('https://')) host = host.substring(8);
+    final slashIdx = host.indexOf('/');
+    if (slashIdx != -1) host = host.substring(0, slashIdx);
+    final qIdx = host.indexOf('?');
+    if (qIdx != -1) host = host.substring(0, qIdx);
+    final cIdx = host.indexOf(':');
+    if (cIdx != -1) {
+      port = int.tryParse(host.substring(cIdx + 1)) ?? port;
+      host = host.substring(0, cIdx);
+    }
+
+    if (host.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invalid QR code format.'),
+            backgroundColor: GooglePhotosColors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+              const SizedBox(width: 12),
+              Expanded(child: Text('Connecting to Server ($host:$port)...')),
+            ],
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+    final success = await _probeIp(client, host, targetPort: port, authToken: authToken);
+
+    if (success) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✓ Connected & paired with Server ($host)! Camera auto-backup active.'),
+            backgroundColor: GooglePhotosColors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not reach server at $host:$port. Ensure both devices are on the same Wi-Fi and Server Hub is running.'),
+            backgroundColor: GooglePhotosColors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _handlePairWithPeer(NearbyPeer peer) async {
@@ -3169,6 +3393,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   TextButton.icon(
                     style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                    onPressed: () => _openQrScanner(),
+                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 14),
+                    label: const Text('Scan QR', style: TextStyle(fontSize: 11)),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                     onPressed: _promptConnectByIp,
                     icon: const Icon(Icons.wifi_find_rounded, size: 14),
                     label: const Text('Add by IP', style: TextStyle(fontSize: 11)),
@@ -3804,16 +4035,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(width: 8),
-            FilledButton.tonal(
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                minimumSize: const Size(0, 32),
-              ),
-              onPressed: _showConnectServerModal,
-              child: Text(
-                hasPeer ? 'Change' : '+ Connect',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton.outlined(
+                  tooltip: 'Scan Server QR',
+                  icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                  style: IconButton.styleFrom(
+                    foregroundColor: GooglePhotosColors.blue,
+                    side: BorderSide(color: GooglePhotosColors.blue.withValues(alpha: 0.5)),
+                    padding: const EdgeInsets.all(7),
+                    minimumSize: const Size(34, 34),
+                  ),
+                  onPressed: () => _openQrScanner(),
+                ),
+                const SizedBox(width: 6),
+                FilledButton.tonal(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                    minimumSize: const Size(0, 32),
+                  ),
+                  onPressed: _showConnectServerModal,
+                  child: Text(
+                    hasPeer ? 'Change' : '+ Connect',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -3911,6 +4159,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const SizedBox(height: 12),
                   ],
 
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: GooglePhotosColors.blue,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      elevation: 0,
+                    ),
+                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+                    label: const Text(
+                      'Scan Server QR Code',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _openQrScanner();
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
                   Row(
                     children: [
                       Expanded(
@@ -3920,6 +4188,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           onPressed: () {
                             Navigator.pop(ctx);
                             _promptConnectByIp();
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.photo_library_outlined, size: 16),
+                          label: const Text('Pick QR Image', style: TextStyle(fontSize: 12)),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _openQrScanner(prompt: 'Select QR screenshot or image from photos');
                           },
                         ),
                       ),
@@ -3944,12 +4223,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       labelText: 'Server Pairing PIN or Link',
                       hintText: 'e.g. 982-411 or https://p2pme.pages.dev/...',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.paste),
-                        onPressed: () async {
-                          final data = await Clipboard.getData('text/plain');
-                          if (data?.text != null) pinController.text = data!.text!.trim();
-                        },
+                      suffixIcon: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                            tooltip: 'Scan QR Code',
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _openQrScanner();
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.paste, size: 18),
+                            tooltip: 'Paste from clipboard',
+                            onPressed: () async {
+                              final data = await Clipboard.getData('text/plain');
+                              if (data?.text != null) pinController.text = data!.text!.trim();
+                            },
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -4125,6 +4418,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
         ),
         actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.qr_code_scanner_rounded, size: 16),
+            label: const Text('Scan QR'),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openQrScanner(
+                title: 'Scan Folder Pairing QR',
+                prompt: 'Point camera at the Folder QR code to join',
+              );
+            },
+          ),
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: GooglePhotosColors.blue),

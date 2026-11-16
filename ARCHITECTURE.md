@@ -180,6 +180,10 @@ flowchart LR
 2. **Folder Pairing Tickets (Tab 2):**
    * Encodes a signed, base64-url pairing ticket containing folder ID, node identity, access permissions, and a timestamp nonce.
    * 1-tap regeneration re-derives the authentication token via BLAKE3, rendering prior tickets obsolete and updating the dynamic QR code in place.
+3. **Camera QR Viewfinder & Client Pairing (Tab 2):**
+   * The sender device (iOS, Android, or PC) opens the native camera viewfinder (`mobile_scanner` via AVFoundation on iOS, CameraX on Android) or selects a QR image.
+   * Scanning the server's QR code extracts the host IP, HTTP port (45455), and secret token (`?key=...`).
+   * The client probes the server's `/api/info` endpoint, establishes the paired state, saves credentials to `.paired_server` for automated persistence, and triggers camera roll auto-backup.
 
 
 

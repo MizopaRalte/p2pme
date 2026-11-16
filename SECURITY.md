@@ -56,6 +56,13 @@
   * **1-Tap Dynamic Rotation:** Users can rotate the secret key on demand from Tab 3. Rotating the key updates the in-memory and persistent secret immediately, rendering all previously shared QR codes and browser links (`?key=...`) completely unusable (HTTP 403 Forbidden).
   * **BLAKE3 Folder Ticket Invalidation:** Regenerating folder tickets re-derives the ticket with a new timestamp nonce, retiring older tickets to guarantee zero conflict.
 
+### G. Camera QR Code & Authorization Boundaries
+* **Risk:** Malicious or malformed QR codes scanned by the client camera causing injection attacks, unauthorized server connection, or credential theft.
+* **Mitigation:**
+  * **Strict URI Parsing & Host Sanitization:** Scanned QR payloads are strictly validated using RFC-compliant URI parsers. Non-HTTP and non-P2Pme schemes are rejected. Hostnames and IP addresses are sanitized before network sockets are opened.
+  * **Authorization Isolation:** Server Hub secret tokens extracted from QR codes are scoped exclusively to the target peer and never leaked across other network interfaces or third-party servers.
+  * **Zero Cloud Intermediaries:** Device pairing handshakes occur directly over the local network via peer-to-peer HTTP/WebSockets with zero telemetry or cloud logging.
+
 ---
 
 ## 3. Reporting a Vulnerability

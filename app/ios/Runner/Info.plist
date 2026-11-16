@@ -35,6 +35,8 @@
 	</array>
 
 	<!-- Permissions for Background Camera Roll Backup & P2P LAN -->
+	<key>NSCameraUsageDescription</key>
+	<string>P2Pme uses camera access to scan Server QR codes for instant 1-tap backup and device pairing.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>P2Pme needs access to your photos to automatically back up your camera roll to your home server.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

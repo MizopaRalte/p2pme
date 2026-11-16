@@ -32,7 +32,9 @@
 * **Self-Destructing Ephemeral Security:** 3 incorrect PIN attempts wipe the session instantly; sessions automatically expire in 10 minutes.
 
 ### 🔄 2. Backup Tab: Continuous Resilio-Style Sync
+* **Instant Camera QR Server Pairing:** 1-tap connection to your 24/7 Server Hub. Tap "Scan Server QR Code" on your sending phone (e.g. iPhone) and point at the Server Hub screen (e.g. Android phone or PC). Automatically parses IP, port, and 256-bit CSPRNG security tokens for instantaneous zero-typing pairing.
 * **1-Tap Camera Roll Auto-Backup:** Automatically tracks and replicates your photos/videos directly to your computer or backup server in full original quality.
+* **Persistent Auto-Reconnect:** Remembers paired server destinations across app restarts, resuming unattended background synchronization automatically.
 * **Storage-Saver Archive Mode:** Free up storage on your phone by deleting local photos—synced copies on your PC/server remain safe and untouched.
 * **Folder Management & Instant Deletion:** Easily add folders (Camera Roll, WhatsApp Media, or any custom folder) and remove them from sync with 1 tap without losing local files.
 * **Folder QR & Ticket Sharing:** View and share pairing tickets or QR codes for any synced folder to pair directly with Windows (`p2pme join <ticket>`) or another phone.

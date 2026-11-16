@@ -666,6 +666,22 @@
   const modalHubPort = document.getElementById('modalHubPort');
   const modalHubToken = document.getElementById('modalHubToken');
 
+  if (modalHubHost) {
+    modalHubHost.addEventListener('input', () => {
+      const val = modalHubHost.value.trim();
+      if (val.includes('://') || val.includes('?key=')) {
+        try {
+          const url = new URL(val.startsWith('http') ? val : `http://${val}`);
+          if (url.hostname) modalHubHost.value = url.hostname;
+          if (url.port && modalHubPort) modalHubPort.value = url.port;
+          if (url.searchParams.has('key') && modalHubToken) {
+            modalHubToken.value = url.searchParams.get('key');
+          }
+        } catch (_) {}
+      }
+    });
+  }
+
   function getSavedHubs() {
     try {
       const data = localStorage.getItem('p2pme_saved_hubs');
@@ -801,10 +817,22 @@
   };
 
   window.saveHubFromModal = function() {
-    const name = modalHubName ? modalHubName.value.trim() : 'Home Android Hub';
-    const host = modalHubHost ? modalHubHost.value.trim() : '192.168.178.35';
-    const port = modalHubPort ? parseInt(modalHubPort.value.trim()) || 45455 : 45455;
-    const token = modalHubToken ? modalHubToken.value.trim() : '';
+    let name = modalHubName ? modalHubName.value.trim() : 'Home Android Hub';
+    let host = modalHubHost ? modalHubHost.value.trim() : '192.168.178.35';
+    let port = modalHubPort ? parseInt(modalHubPort.value.trim()) || 45455 : 45455;
+    let token = modalHubToken ? modalHubToken.value.trim() : '';
+
+    // Smart auto-parse if user pasted full QR code link (e.g. http://192.168.1.50:45455?key=...)
+    try {
+      if (host.includes('://') || host.includes('?') || host.includes(':')) {
+        const url = new URL(host.startsWith('http') ? host : `http://${host}`);
+        if (url.hostname) host = url.hostname;
+        if (url.port) port = parseInt(url.port);
+        if (url.searchParams.has('key') && !token) {
+          token = url.searchParams.get('key');
+        }
+      }
+    } catch (_) {}
 
     if (!host) {
       alert('Please enter a valid IP address or domain');

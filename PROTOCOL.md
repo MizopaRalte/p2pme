@@ -164,6 +164,18 @@ Content-Type: application/json
 }
 ```
 
+### C. QR Code Payload & Client Pairing Handshake
+When scanned by the client camera in Tab 2 (Backup):
+1. **Server QR Code Schema:**
+```text
+http://<host>:<port>?key=<256-bit_hex_token>
+```
+2. **Client Parsing Sequence:**
+   * Extracts IPv4 / domain address, port (defaults to 45455), and `key` authorization token.
+   * Dispatches `GET /api/info` with connection timeout of 4 seconds.
+   * If server responds with valid P2Pme metadata (`"p2pme": true`), client marks the peer as `isPaired: true` and associates `authToken`.
+   * Client persists connection parameters to local configuration (`.paired_server`) and initiates immediate background camera sync.
+
 ### B. Folder Pairing Ticket Serialization
 Folder tickets are encoded as compact Base64-URL strings:
 ```text
