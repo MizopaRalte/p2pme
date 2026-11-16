@@ -70,6 +70,12 @@ import Photos
           let asset = fetchResult.object(at: i)
           let resources = PHAssetResource.assetResources(for: asset)
           let filename = resources.first?.originalFilename ?? "IMG_\(asset.localIdentifier.prefix(8)).jpg"
+          var fileSize: Int64 = 0
+          if let res = resources.first {
+            if let sizeVal = res.value(forKey: "fileSize") as? CLong {
+              fileSize = Int64(sizeVal)
+            }
+          }
           let item: [String: Any] = [
             "id": asset.localIdentifier,
             "filename": filename,
@@ -78,6 +84,7 @@ import Photos
             "duration": asset.duration,
             "pixelWidth": asset.pixelWidth,
             "pixelHeight": asset.pixelHeight,
+            "fileSize": fileSize,
           ]
           items.append(item)
         }

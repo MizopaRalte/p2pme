@@ -10,6 +10,7 @@ class CameraAssetItem {
   final double createdTimestamp;
   final String mediaType;
   final String? localFilePath;
+  final int fileSize;
 
   CameraAssetItem({
     required this.id,
@@ -17,6 +18,7 @@ class CameraAssetItem {
     required this.createdTimestamp,
     required this.mediaType,
     this.localFilePath,
+    this.fileSize = 0,
   });
 }
 
@@ -161,6 +163,7 @@ class CameraBackupService {
               filename: m['filename']?.toString() ?? 'photo.jpg',
               createdTimestamp: (m['created'] as num?)?.toDouble() ?? 0.0,
               mediaType: m['mediaType']?.toString() ?? 'image',
+              fileSize: (m['fileSize'] as num?)?.toInt() ?? 0,
             ));
           }
         }
@@ -197,6 +200,7 @@ class CameraBackupService {
                     createdTimestamp: stat.modified.millisecondsSinceEpoch.toDouble(),
                     mediaType: lower.endsWith('.mp4') || lower.endsWith('.mov') ? 'video' : 'image',
                     localFilePath: entity.path,
+                    fileSize: stat.size,
                   ));
                 }
               }
@@ -212,6 +216,7 @@ class CameraBackupService {
 
     final unsynced = allAssets.where((a) => !_syncedAssetIds.contains(a.id)).toList();
     _pendingAssetsCount = unsynced.length;
+    _pendingTotalBytes = unsynced.fold<int>(0, (sum, item) => sum + item.fileSize);
 
     _state = unsynced.isEmpty ? CameraBackupState.upToDate : CameraBackupState.idle;
     _stateController.add(_state);
@@ -221,6 +226,42 @@ class CameraBackupService {
 
   bool _isSyncPaused = false;
   bool get isSyncPaused => _isSyncPaused;
+
+  int _pendingTotalBytes = 0;
+  int _batchTotalBytes = 0;
+  int _batchBytesSent = 0;
+  int _currentFileTotalBytes = 0;
+  int _currentFileBytesSent = 0;
+
+  int get pendingTotalBytes => _pendingTotalBytes;
+  int get batchTotalBytes => _batchTotalBytes;
+  int get batchBytesSent => _batchBytesSent;
+  int get currentFileTotalBytes => _currentFileTotalBytes;
+  int get currentFileBytesSent => _currentFileBytesSent;
+
+  double get overallBatchProgressRatio {
+    if (_batchTotalBytes <= 0) return 0.0;
+    return (_batchBytesSent / _batchTotalBytes).clamp(0.0, 1.0);
+  }
+
+  static String formatBytes(int bytes) {
+    if (bytes <= 0) return '0 B';
+    const kb = 1024;
+    const mb = kb * 1024;
+    const gb = mb * 1024;
+    if (bytes >= gb) {
+      return '${(bytes / gb).toStringAsFixed(2)} GB';
+    } else if (bytes >= mb) {
+      return '${(bytes / mb).toStringAsFixed(1)} MB';
+    } else if (bytes >= kb) {
+      return '${(bytes / kb).toStringAsFixed(0)} KB';
+    } else {
+      return '$bytes B';
+    }
+  }
+
+  String get formattedBatchBytes => '${formatBytes(_batchBytesSent)} of ${formatBytes(_batchTotalBytes)}';
+  String get formattedPendingBytes => formatBytes(_pendingTotalBytes);
 
   double _currentSpeedBytesPerSec = 0.0;
   double _currentFileProgressRatio = 0.0;
@@ -270,6 +311,9 @@ class CameraBackupService {
     _state = CameraBackupState.syncing;
     _stateController.add(_state);
     int transferredCount = 0;
+
+    _batchTotalBytes = pending.fold<int>(0, (sum, item) => sum + item.fileSize);
+    _batchBytesSent = 0;
 
     String activeHost = peerIp;
     int activePort = peerPort;
@@ -322,15 +366,25 @@ class CameraBackupService {
       final uploadFile = File(filePathToUpload);
       if (!await uploadFile.exists()) continue;
 
+      final len = await uploadFile.length();
+      _currentFileTotalBytes = len;
+      _currentFileBytesSent = 0;
+      if (item.fileSize <= 0) {
+        _batchTotalBytes += len;
+      }
+
       for (int attempt = 0; attempt < 2; attempt++) {
         try {
           final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
-          final url = Uri.parse('http://$activeHost:$activePort/upload?name=${Uri.encodeComponent(item.filename)}&token=$token');
+          final url = Uri.parse('http://$activeHost:$activePort/upload?name=${Uri.encodeComponent(item.filename)}&token=$token&fileIndex=${i + 1}&totalFiles=${pending.length}&batchTotal=$_batchTotalBytes&batchSent=$_batchBytesSent');
           final req = await client.postUrl(url);
 
-          final len = await uploadFile.length();
           req.headers.contentLength = len;
           req.headers.contentType = ContentType.binary;
+          req.headers.set('X-File-Index', (i + 1).toString());
+          req.headers.set('X-Total-Files', pending.length.toString());
+          req.headers.set('X-Batch-Total-Bytes', _batchTotalBytes.toString());
+          req.headers.set('X-Batch-Bytes-Sent', _batchBytesSent.toString());
 
           int bytesSentThisFile = 0;
           final Stopwatch sampleWatch = Stopwatch()..start();
@@ -344,6 +398,8 @@ class CameraBackupService {
             req.add(chunk);
             bytesSentThisFile += chunk.length;
             bytesSinceSample += chunk.length;
+            _batchBytesSent += chunk.length;
+            _currentFileBytesSent = bytesSentThisFile;
 
             if (sampleWatch.elapsedMilliseconds >= 250) {
               final double seconds = sampleWatch.elapsedMicroseconds / 1000000.0;
@@ -373,6 +429,9 @@ class CameraBackupService {
         } catch (e) {
           debugPrint('[CameraBackup] Upload attempt ${attempt + 1} failed for ${item.filename} on $activeHost: $e');
           _lastError = e.toString();
+          // If retrying, rewind batch bytes sent for this attempt
+          _batchBytesSent = (_batchBytesSent - _currentFileBytesSent).clamp(0, _batchTotalBytes);
+          _currentFileBytesSent = 0;
           // If LAN failed and WAN is available, switch active endpoint to WAN and retry once
           if (attempt == 0 && wanHost != null && wanHost.isNotEmpty && activeHost != wanHost) {
             activeHost = wanHost;

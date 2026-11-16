@@ -191,16 +191,19 @@ flowchart LR
 
 ## 9. Real-Time Transfer Speed & Ingestion Telemetry
 
-P2Pme incorporates symmetric high-frequency sampling for wire-speed network observability:
+P2Pme incorporates symmetric high-frequency sampling and batch metadata headers for wire-speed network observability:
 
-1. **Sender-Side Measurement (`CameraBackupService` & Direct Beam):**
+1. **Sender-Side Measurement & Batch Telemetry (`CameraBackupService` & Direct Beam):**
    * Emits chunks across HTTP streams while maintaining a 200–250ms sampling timer (`Stopwatch`).
    * Evaluates instantaneous wire throughput: `speedMBps = (deltaBytes / deltaSeconds) / (1024 * 1024)`.
-   * Drives real-time UI meters displaying current file throughput (e.g. `64.8 MB/s`), batch percentage, and dynamic Pause / Resume controls.
+   * Drives real-time UI meters displaying upload throughput (`Uploading: 64.8 MB/s`), batch percentage (`25%`), total bytes transferred against total batch (`1.25 GB / 5.00 GB`), current file progress (`IMG_1234.JPG • 4.5 MB / 10.0 MB`), and sender-exclusive Pause / Resume controls.
+   * Transmits batch state headers (`X-File-Index`, `X-Total-Files`, `X-Batch-Total-Bytes`, `X-Batch-Bytes-Sent`) with every chunk stream.
 2. **Receiver-Side Measurement (24/7 Server Hub & Ingestion Engine):**
    * Streams incoming HTTP `/upload` request byte chunks directly into target files (`DCIM/Camera` or user-defined destination).
-   * Computes incoming ingress velocity every 200ms based on chunk bytes ingested against total file content length.
-   * Displays an active live ingestion card on Tab 3 with animated progress bar and throughput badge (`XX.X MB/s`).
+   * Computes incoming ingress velocity every 200ms based on chunk bytes ingested against total file content length (`Downloading: 64.8 MB/s`).
+   * Parses batch headers to display live download progress: active file index out of total files (`Downloading file 12 of 596`), total batch bytes received out of total batch (`Received 1.25 GB of 5.00 GB • 25%`), and current file percentage.
+   * Surfaces active receiving cards across both Tab 3 (Server) and Tab 2 (Backup).
+   * **Sender-Exclusive Control (Receiver Lock):** In Server Mode, the receiver operates as a dedicated automated ingestion hub; transfers and pause/resume states are strictly managed by the initiating sender to prevent desynchronization or conflicting two-way transfers.
 
 ---
 

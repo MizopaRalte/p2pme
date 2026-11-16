@@ -1001,21 +1001,31 @@
 
     let successCount = 0;
     const totalFiles = toSend.length;
+    const totalBatchBytes = toSend.reduce((sum, f) => sum + (f.size || 0), 0);
+    let batchBytesSent = 0;
     const uploadUrlBase = `http://${hub.host}:${hub.port}/upload`;
     const hubToken = hub.token || localStorage.getItem('p2pme_hub_token') || '';
+
+    const formatBytesJs = (b) => {
+      if (!b) return '0 B';
+      if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+      if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+      if (b >= 1024) return (b / 1024).toFixed(0) + ' KB';
+      return b + ' B';
+    };
 
     // Smart sequential pipeline: feeds 1 file at a time to prevent browser memory exhaustion
     for (let i = 0; i < totalFiles; i++) {
       const file = toSend[i];
       const mb = (file.size / (1024 * 1024)).toFixed(1);
-      const overallPct = Math.round((i / totalFiles) * 100);
+      const overallPct = totalBatchBytes > 0 ? Math.round((batchBytesSent / totalBatchBytes) * 100) : Math.round((i / totalFiles) * 100);
 
       if (sendProgressBar) {
         sendProgressBar.style.width = `${Math.max(5, overallPct)}%`;
-        sendProgressBar.innerText = `[${i + 1}/${totalFiles}] ${file.name} (${mb} MB) • ${overallPct}%`;
+        sendProgressBar.innerText = `[${i + 1}/${totalFiles}] ${file.name} (${mb} MB) • ${formatBytesJs(batchBytesSent)}/${formatBytesJs(totalBatchBytes)} (${overallPct}%)`;
       }
       if (sendStatus) {
-        sendStatus.innerHTML = `<span style="color:#8AB4F8;">Feeding ${i + 1} of ${totalFiles}: <strong>${escapeHtml(file.name)}</strong> (${mb} MB)...</span>`;
+        sendStatus.innerHTML = `<span style="color:#8AB4F8;">Uploading ${i + 1} of ${totalFiles}: <strong>${escapeHtml(file.name)}</strong> (${mb} MB) • Total: ${formatBytesJs(batchBytesSent)} of ${formatBytesJs(totalBatchBytes)}</span>`;
       }
 
       let fileSuccess = false;
@@ -1024,20 +1034,25 @@
       // Smart retry: up to 2 attempts per file on transient network blip
       for (let attempt = 1; attempt <= 2 && !fileSuccess; attempt++) {
         try {
-          const uploadUrl = `${uploadUrlBase}?name=${encodeURIComponent(file.name)}&token=${encodeURIComponent(hubToken)}`;
+          const uploadUrl = `${uploadUrlBase}?name=${encodeURIComponent(file.name)}&token=${encodeURIComponent(hubToken)}&fileIndex=${i + 1}&totalFiles=${totalFiles}&batchTotal=${totalBatchBytes}&batchSent=${batchBytesSent}`;
           const res = await fetch(uploadUrl, {
             method: 'POST',
             body: file,
             mode: 'cors',
             headers: {
               'Content-Type': file.type || 'application/octet-stream',
-              'x-p2pme-token': hubToken
+              'x-p2pme-token': hubToken,
+              'X-File-Index': (i + 1).toString(),
+              'X-Total-Files': totalFiles.toString(),
+              'X-Batch-Total-Bytes': totalBatchBytes.toString(),
+              'X-Batch-Bytes-Sent': batchBytesSent.toString()
             }
           });
 
           if (res.ok) {
             fileSuccess = true;
             successCount++;
+            batchBytesSent += (file.size || 0);
           } else {
             throw new Error(`Server returned HTTP ${res.status}`);
           }

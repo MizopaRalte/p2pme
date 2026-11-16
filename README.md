@@ -39,8 +39,11 @@
   * **🌐 Tier 3 (Internet Mesh / WAN):** Automatic fallback to Tailscale mesh (`100.x.x.x`) or remote IP when away from home on 5G/cellular data.
 * **Persistent Server State (Zero Disappearing Hubs):** Remembers paired servers across app restarts and network switches. Displays high-contrast status badges (`✓ Live (Wi-Fi)`, `⚡ Live (USB Cable)`, `🌐 Live (Remote Mesh)`, `⏳ Waiting for connection / Cellular`) with manual Reconnect/Ping and safe Unpair confirmation.
 * **Unlimited Camera Roll Scanning:** Removed the artificial 500-photo ceiling. Full PhotoKit and Android DCIM indexing processes libraries of any size (596+ items) with zero truncation.
-* **Real-time Wire-Speed Telemetry:** Live throughput monitoring directly on the backup card displaying real-time speed in `MB/s` alongside current file progress.
-* **1-Tap Pause & Resume:** Pause active backup transfers on demand at any time to preserve battery or bandwidth, and resume when ready without losing progress.
+* **Comprehensive Bidirectional Telemetry (GB & Percentage Clarity):**
+  * **Sender View:** Shows `Uploading: XX.X MB/s`, active file index out of total (`Sending File 12 of 596: IMG_1234.JPG`), total batch volume sent out of total size (`1.25 GB / 5.00 GB • 25%`), dual batch and single-file progress bars, and 1-tap **Pause / Resume Backup** button.
+  * **Receiver View:** Shows `Downloading: XX.X MB/s`, active file index out of total (`Downloading file 12 of 596: IMG_1234.JPG`), total batch volume received out of total size (`Received 1.25 GB of 5.00 GB • 25%`), and active receiver banners on both Server and Backup tabs.
+  * **Receiver Lock (Sender-Exclusive Pause Control):** In Server Mode, the receiver functions as a dedicated automated destination. Pause and resume controls are strictly reserved for the sender device to eliminate desynchronization and accidental two-way conflicts.
+* **1-Tap Pause & Resume (Sender Only):** Pause active backup transfers on demand at any time to preserve battery or bandwidth, and resume when ready without losing progress.
 * **1-Tap Camera Roll Auto-Backup:** Automatically tracks and replicates your photos/videos directly to your computer or backup server in full original quality.
 * **Storage-Saver Archive Mode:** Free up storage on your phone by deleting local photos—synced copies on your PC/server remain safe and untouched.
 * **Folder Management & Instant Deletion:** Easily add folders (Camera Roll, WhatsApp Media, or any custom folder) and remove them from sync with 1 tap without losing local files.
@@ -51,7 +54,7 @@
 * **Turn Any Device into a Server:** Toggle 24/7 Backup Server mode to accept incoming drops and continuous backups with background keep-alive.
 * **Dual-Endpoint Pairing (LAN + Remote/WAN):** Configure an optional Remote / WAN Endpoint (e.g. Tailscale IP or domain). QR code embeds `&wan=...` for seamless zero-config pairing across both LAN and internet.
 * **⚡ Direct USB Cable Interface Detection:** Automatically discovers active USB tethering interfaces (`rndis`, `usb`, `ncm`, `cdc`) and exposes them for direct cable backup.
-* **Live Ingestion Telemetry & Speed Meter:** Displays real-time incoming transfer speeds (`MB/s`), active receiving file names, and dynamic progress bars for both server and sender.
+* **Live Ingestion Telemetry & Speed Meter:** Displays real-time download speed (`Downloading: XX.X MB/s`), active receiving file names, total batch gigabytes received (`Received X.XX GB of Y.YY GB`), and dynamic dual progress bars. Server Mode enforces receiver lock (controlled by sender).
 * **Custom Save Destination Folder:** Choose exactly where received files and folder backups land on disk (e.g. internal storage, external SD card, or desktop path).
 * **Direct Server Ticket & Dynamic QR Code:** Connect new client devices to your hub using a master server pairing code or direct LAN socket (`http://<ip>:45455`).
 * **1-Tap Zero-Conflict Key Regeneration:** Rotate your Server Hub Secret Key (256-bit CSPRNG) on demand with 1 tap. Immediately revokes older QR codes and browser links with zero server collisions.

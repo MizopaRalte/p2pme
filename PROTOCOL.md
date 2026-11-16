@@ -199,23 +199,30 @@ p2pme://folder?v=1&node=<NODE_ID>&folder=<FOLDER_ID>&access=rw&token=<BLAKE3_HAS
 
 ## 8. Streaming Chunk & Throughput Telemetry Wire Sequence
 
-For continuous file transfers, P2Pme uses streaming HTTP chunking with synchronized client-server throughput sampling:
+For continuous file transfers, P2Pme uses streaming HTTP chunking with synchronized client-server throughput sampling and batch metadata headers:
 
 ```text
 Sender (Client)                                          Receiver (24/7 Hub)
       |                                                         |
       | --- POST /upload?name=<file>&token=<key> -------------> |
       |     Headers: Content-Length, Content-Type: binary       | (Read Content-Length)
+      |              X-File-Index: 12                           | (Extract File Index & Total)
+      |              X-Total-Files: 596                         | 
+      |              X-Batch-Total-Bytes: 5242880000            | (Extract Total Batch Size)
+      |              X-Batch-Bytes-Sent: 1258291200             | (Extract Cumulative Sent)
       |                                                         |
       | === [Chunk 1: 64 KB] =================================> | (Write chunk to sink)
       | === [Chunk 2: 64 KB] =================================> | (Write chunk to sink)
       |     (Sample timer: 200ms -> calculate MB/s)             | (Sample timer: 200ms -> calculate MB/s)
-      |     (Update Sender UI: 64.8 MB/s, progress bar)         | (Update Receiver UI: 64.8 MB/s, progress bar)
+      |     (Update Sender UI: Uploading 64.8 MB/s)             | (Update Receiver UI: Downloading 64.8 MB/s)
+      |     (Batch: 1.25 GB / 5.00 GB • 25%)                    | (Batch: 1.25 GB / 5.00 GB • 25%)
+      |     (File: 45% • 4.5 MB / 10.0 MB)                      | (File: 45% • 4.5 MB / 10.0 MB)
       | === [Chunk N: final] =================================> | (Finalize file, flush sink)
       |                                                         |
       | <--- HTTP/1.1 200 OK (Transfer Complete) -------------- |
 ```
 * **Real-time Velocity:** Measured over 200–250ms delta windows using high-precision monotonic timers.
-* **Pause Abort Semantics:** When the user taps "Pause Backup", the client issues `request.abort()` or finishes the active chunk cleanly, stopping the stream without corrupting state.
+* **Batch Telemetry:** Both peers maintain synchronized batch progress in bytes and gigabytes so users know exact remaining data volume and completion percentages.
+* **Pause Abort Semantics:** When the sender taps "Pause Backup", the client issues `request.abort()` or finishes the active chunk cleanly, stopping the stream without corrupting state. In Server Mode, pause controls are restricted to the sender to prevent desynchronization.
 
 

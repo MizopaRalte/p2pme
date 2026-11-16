@@ -373,6 +373,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _receivingFileName;
   double _receivingSpeedMBps = 0.0;
   double _receivingProgressRatio = 0.0;
+  int _receivingCurrentFileIndex = 0;
+  int _receivingTotalFiles = 0;
+  int _receivingBatchTotalBytes = 0;
+  int _receivingBatchBytesReceived = 0;
+  int _receivingCurrentFileTotalBytes = 0;
+  int _receivingCurrentFileBytesReceived = 0;
 
   final TextEditingController _pinInputController = TextEditingController();
   final TextEditingController _ticketInputController = TextEditingController();
@@ -543,8 +549,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 12;
-  String _currentVersionName = '1.1.0';
+  int _currentVersionCode = 13;
+  String _currentVersionName = '1.1.1';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -2047,12 +2053,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final Stopwatch sampleWatch = Stopwatch()..start();
       int bytesSinceSample = 0;
 
+      final fileIndex = int.tryParse(request.headers.value('X-File-Index') ?? request.uri.queryParameters['fileIndex'] ?? '0') ?? 0;
+      final totalBatchFiles = int.tryParse(request.headers.value('X-Total-Files') ?? request.uri.queryParameters['totalFiles'] ?? '0') ?? 0;
+      final batchTotalBytes = int.tryParse(request.headers.value('X-Batch-Total-Bytes') ?? request.uri.queryParameters['batchTotal'] ?? '0') ?? 0;
+      final batchBytesSent = int.tryParse(request.headers.value('X-Batch-Bytes-Sent') ?? request.uri.queryParameters['batchSent'] ?? '0') ?? 0;
+
       if (mounted) {
         setState(() {
           _isReceivingActive = true;
           _receivingFileName = safeName;
           _receivingSpeedMBps = 0.0;
           _receivingProgressRatio = 0.0;
+          _receivingCurrentFileIndex = fileIndex;
+          _receivingTotalFiles = totalBatchFiles;
+          _receivingBatchTotalBytes = batchTotalBytes;
+          _receivingBatchBytesReceived = batchBytesSent;
+          _receivingCurrentFileTotalBytes = totalExpectedBytes;
+          _receivingCurrentFileBytesReceived = 0;
         });
       }
 
@@ -2060,6 +2077,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         sink.add(chunk);
         receivedThisFile += chunk.length;
         bytesSinceSample += chunk.length;
+        _receivingCurrentFileBytesReceived = receivedThisFile;
 
         if (sampleWatch.elapsedMilliseconds >= 200) {
           final double seconds = sampleWatch.elapsedMicroseconds / 1000000.0;
@@ -2071,6 +2089,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (totalExpectedBytes > 0) {
                   _receivingProgressRatio = (receivedThisFile / totalExpectedBytes).clamp(0.0, 1.0);
                 }
+                _receivingBatchBytesReceived = batchBytesSent + receivedThisFile;
               });
             }
           }
@@ -2083,9 +2102,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final fileLen = await outFile.length();
       if (mounted) {
         setState(() {
-          _isReceivingActive = false;
-          _receivingSpeedMBps = 0.0;
-          _receivingProgressRatio = 0.0;
+          if (_receivingTotalFiles <= 0 || _receivingCurrentFileIndex >= _receivingTotalFiles) {
+            _isReceivingActive = false;
+            _receivingSpeedMBps = 0.0;
+            _receivingProgressRatio = 0.0;
+          }
           _lastReceivedFromBrowser = safeName;
           _receivedFiles++;
           _receivedBytes += fileLen;
@@ -2093,7 +2114,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.green.shade700,
-            content: Text('Received $safeName (${(fileLen / (1024 * 1024)).toStringAsFixed(1)} MB)'),
+            content: Text('Received $safeName (${CameraBackupService.formatBytes(fileLen)})'),
           ),
         );
       }
@@ -2629,6 +2650,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
 
     int sent = 0;
+    int totalBytes = 0;
+    for (var path in _selectedFilePaths) {
+      final f = File(path);
+      if (f.existsSync()) totalBytes += f.lengthSync();
+    }
+    int totalBytesSent = 0;
+
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
     for (var path in _selectedFilePaths) {
       final file = File(path);
@@ -2636,11 +2664,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final fileName = path.split(Platform.pathSeparator).last;
       try {
         final tokenToSend = peer.authToken ?? _webDropSessionToken;
-        final url = Uri.parse('http://${peer.ip}:${peer.port}/upload?name=${Uri.encodeComponent(fileName)}&token=$tokenToSend');
+        final url = Uri.parse('http://${peer.ip}:${peer.port}/upload?name=${Uri.encodeComponent(fileName)}&token=$tokenToSend&fileIndex=${sent + 1}&totalFiles=$total&batchTotal=$totalBytes&batchSent=$totalBytesSent');
         final req = await client.postUrl(url);
         final len = await file.length();
         req.headers.contentLength = len;
         req.headers.contentType = ContentType.binary;
+        req.headers.set('X-File-Index', (sent + 1).toString());
+        req.headers.set('X-Total-Files', total.toString());
+        req.headers.set('X-Batch-Total-Bytes', totalBytes.toString());
+        req.headers.set('X-Batch-Bytes-Sent', totalBytesSent.toString());
+
         final Stopwatch sampleWatch = Stopwatch()..start();
         int bytesSinceSample = 0;
         double currentSpeedMBps = 0.0;
@@ -2648,6 +2681,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await for (final chunk in file.openRead()) {
           req.add(chunk);
           bytesSinceSample += chunk.length;
+          totalBytesSent += chunk.length;
 
           if (sampleWatch.elapsedMilliseconds >= 200) {
             final double s = sampleWatch.elapsedMicroseconds / 1000000.0;
@@ -2826,7 +2860,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _isReceivingActive ? 'Receiving File Transfer...' : 'Receiver Ingestion Status',
+                              _isReceivingActive
+                                  ? (_receivingTotalFiles > 0
+                                      ? 'Downloading file $_receivingCurrentFileIndex of $_receivingTotalFiles'
+                                      : 'Downloading Incoming File...')
+                                  : 'Receiver Ingestion Status',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
@@ -2839,8 +2877,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             Text(
                               _isReceivingActive && _receivingFileName != null
                                   ? 'Saving: $_receivingFileName'
-                                  : 'Total: $_receivedFiles files (${(_receivedBytes / (1024 * 1024)).toStringAsFixed(1)} MB) ingested',
+                                  : 'Total: $_receivedFiles files (${CameraBackupService.formatBytes(_receivedBytes)}) ingested',
                               style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
@@ -2853,33 +2892,81 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
-                            '${_receivingSpeedMBps.toStringAsFixed(1)} MB/s',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                            'Downloading: ${_receivingSpeedMBps.toStringAsFixed(1)} MB/s',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
                           ),
                         ),
                     ],
                   ),
                   if (_isReceivingActive) ...[
                     const SizedBox(height: 12),
+                    if (_receivingBatchTotalBytes > 0) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Total Batch: ${CameraBackupService.formatBytes(_receivingBatchBytesReceived)} of ${CameraBackupService.formatBytes(_receivingBatchTotalBytes)}',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.grey.shade300 : Colors.grey.shade800),
+                          ),
+                          Text(
+                            '${((_receivingBatchBytesReceived / _receivingBatchTotalBytes) * 100).toInt().clamp(0, 100)}%',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.green),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: (_receivingBatchBytesReceived / _receivingBatchTotalBytes).clamp(0.0, 1.0),
+                          minHeight: 8,
+                          backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.2),
+                          color: GooglePhotosColors.green,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(3),
                       child: LinearProgressIndicator(
                         value: _receivingProgressRatio > 0 ? _receivingProgressRatio : null,
-                        minHeight: 6,
-                        backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.2),
-                        color: GooglePhotosColors.green,
+                        minHeight: 4,
+                        backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.15),
+                        color: GooglePhotosColors.green.withValues(alpha: 0.7),
                       ),
                     ),
                     const SizedBox(height: 4),
                     Row(
                       children: [
                         Text(
-                          _receivingProgressRatio > 0 ? '${(_receivingProgressRatio * 100).toInt()}%' : 'Transferring...',
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                          _receivingProgressRatio > 0
+                              ? 'File: ${(_receivingProgressRatio * 100).toInt()}% • ${CameraBackupService.formatBytes(_receivingCurrentFileBytesReceived)} / ${CameraBackupService.formatBytes(_receivingCurrentFileTotalBytes)}'
+                              : 'Receiving chunk stream...',
+                          style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                         ),
                         const Spacer(),
-                        const Text('Direct Wi-Fi Speed', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        const Text('Direct Wire-Speed', style: TextStyle(fontSize: 10, color: Colors.grey)),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E2022) : const Color(0xFFF1F3F4),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lock_outline_rounded, size: 12, color: Colors.grey),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Server Hub active: transfers are initiated and paused by the sender device.',
+                              style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ],
@@ -4422,11 +4509,136 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ==========================================
   // AUTO-SYNC FOLDERS LIST & BACKUP TAB
   // ==========================================
+  Widget _buildActiveReceivingBanner(bool isDark) {
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.only(bottom: 14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: GooglePhotosColors.green.withValues(alpha: 0.6), width: 1.5),
+      ),
+      color: isDark ? const Color(0xFF1E2822) : const Color(0xFFE6F4EA),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: const BoxDecoration(
+                    color: GooglePhotosColors.green,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.downloading_rounded, color: Colors.white, size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _receivingTotalFiles > 0
+                                  ? 'Downloading file $_receivingCurrentFileIndex of $_receivingTotalFiles'
+                                  : 'Downloading Incoming File...',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF137333),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: GooglePhotosColors.green,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'Downloading: ${_receivingSpeedMBps.toStringAsFixed(1)} MB/s',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _receivingFileName != null ? 'Saving: $_receivingFileName' : 'Ingesting files to server...',
+                        style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_receivingBatchTotalBytes > 0) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Total Batch: ${CameraBackupService.formatBytes(_receivingBatchBytesReceived)} of ${CameraBackupService.formatBytes(_receivingBatchTotalBytes)}',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.grey.shade300 : Colors.grey.shade800),
+                  ),
+                  Text(
+                    '${((_receivingBatchBytesReceived / _receivingBatchTotalBytes) * 100).toInt().clamp(0, 100)}%',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.green),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: (_receivingBatchBytesReceived / _receivingBatchTotalBytes).clamp(0.0, 1.0),
+                  minHeight: 8,
+                  backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.2),
+                  color: GooglePhotosColors.green,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: _receivingProgressRatio > 0 ? _receivingProgressRatio : null,
+                minHeight: 4,
+                backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.15),
+                color: GooglePhotosColors.green.withValues(alpha: 0.7),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.lock_outline_rounded, size: 12, color: GooglePhotosColors.green),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    'Receiver Mode Active: incoming transfer in progress (controlled by sender).',
+                    style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFolderList() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       children: [
+        if (_isReceivingActive)
+          _buildActiveReceivingBanner(isDark),
         _buildCameraRollAutoBackupCard(),
         _buildConnectedServerCard(isDark),
         const SizedBox(height: 10),
@@ -5209,6 +5421,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildCameraRollAutoBackupCard() {
     final service = CameraBackupService.instance;
     final isSyncing = service.state == CameraBackupState.syncing;
+    final isPaused = service.isSyncPaused;
     final isUpToDate = service.state == CameraBackupState.upToDate && service.pendingAssetsCount == 0;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -5266,12 +5479,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             ),
                             child: Text(
                               isSyncing
-                                  ? 'SYNCING...'
-                                  : (isUpToDate ? 'UP TO DATE' : '${service.pendingAssetsCount} NEW'),
+                                  ? 'UPLOADING (${(service.overallBatchProgressRatio * 100).toInt()}%)'
+                                  : (isPaused
+                                      ? 'PAUSED'
+                                      : (isUpToDate
+                                          ? 'UP TO DATE'
+                                          : '${service.pendingAssetsCount} NEW (${service.formattedPendingBytes})')),
                               style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.bold,
-                                color: isUpToDate ? Colors.green.shade800 : Colors.blue.shade800,
+                                color: isSyncing
+                                    ? GooglePhotosColors.blue
+                                    : (isPaused
+                                        ? Colors.orange.shade800
+                                        : (isUpToDate ? Colors.green.shade800 : Colors.blue.shade800)),
                               ),
                             ),
                           ),
@@ -5280,11 +5501,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       const SizedBox(height: 2),
                       Text(
                         isSyncing && service.currentSyncingFilename != null
-                            ? 'Sending ${service.currentSyncIndex} of ${service.pendingAssetsCount}: ${service.currentSyncingFilename}'
-                            : (service.totalDeviceAssets > 0
-                                ? '${service.totalDeviceAssets} photos on device • ${service.pendingAssetsCount} pending backup'
-                                : 'One-way automatic camera backup to server.'),
+                            ? 'Sending ${service.currentSyncIndex} of ${service.pendingAssetsCount} files • ${service.currentSyncingFilename}'
+                            : (isPaused
+                                ? 'Backup paused (${service.formattedBatchBytes}) • Tap "Resume Backup" to continue'
+                                : (service.totalDeviceAssets > 0
+                                    ? '${service.totalDeviceAssets} photos on device • ${service.pendingAssetsCount} pending backup (${service.formattedPendingBytes})'
+                                    : 'One-way automatic camera backup to server.')),
                         style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -5293,13 +5517,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             if (isSyncing) ...[
               const SizedBox(height: 10),
+              // Overall Batch Progress
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Total Batch: ${service.formattedBatchBytes}',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.grey.shade300 : Colors.grey.shade800),
+                  ),
+                  Text(
+                    '${(service.overallBatchProgressRatio * 100).toInt()}%',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.blue),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
-                  value: service.currentFileProgressRatio > 0 ? service.currentFileProgressRatio : null,
-                  minHeight: 6,
+                  value: service.overallBatchProgressRatio > 0 ? service.overallBatchProgressRatio : null,
+                  minHeight: 8,
                   backgroundColor: GooglePhotosColors.blue.withValues(alpha: 0.15),
                   color: GooglePhotosColors.blue,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // Current File Progress
+              ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: LinearProgressIndicator(
+                  value: service.currentFileProgressRatio > 0 ? service.currentFileProgressRatio : null,
+                  minHeight: 4,
+                  backgroundColor: GooglePhotosColors.blue.withValues(alpha: 0.1),
+                  color: GooglePhotosColors.blue.withValues(alpha: 0.7),
                 ),
               ),
               const SizedBox(height: 4),
@@ -5307,8 +5557,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Expanded(
                     child: Text(
-                      '${(service.currentFileProgressRatio * 100).toInt()}% • ${service.currentSyncingFilename ?? ""}',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isDark ? Colors.grey.shade300 : Colors.grey.shade800),
+                      'File: ${(service.currentFileProgressRatio * 100).toInt()}% • ${CameraBackupService.formatBytes(service.currentFileBytesSent)} / ${CameraBackupService.formatBytes(service.currentFileTotalBytes)}',
+                      style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -5319,7 +5569,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      service.formattedSpeed,
+                      'Uploading: ${service.formattedSpeed}',
                       style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.blue),
                     ),
                   ),
@@ -5352,32 +5602,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Expanded(
                   child: FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: isSyncing ? Colors.orange.shade800 : GooglePhotosColors.blue,
+                      backgroundColor: isSyncing
+                          ? Colors.orange.shade800
+                          : (isPaused ? Colors.teal.shade700 : GooglePhotosColors.blue),
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
-                    onPressed: isSyncing
-                        ? () {
-                            service.pauseSync();
-                            if (mounted) setState(() {});
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Backup paused. Tap "Resume Backup" to continue.'),
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
-                          }
-                        : _syncCameraRollToConnectedPeer,
-                    icon: isSyncing
-                        ? const Icon(Icons.pause_circle_filled_rounded, size: 18)
-                        : const Icon(Icons.sync_rounded, size: 16),
+                    onPressed: _isReceivingActive
+                        ? null
+                        : (isSyncing
+                            ? () {
+                                service.pauseSync();
+                                if (mounted) setState(() {});
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Backup paused. Tap "Resume Backup" to continue.'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            : _syncCameraRollToConnectedPeer),
+                    icon: _isReceivingActive
+                        ? const Icon(Icons.downloading_rounded, size: 16)
+                        : (isSyncing
+                            ? const Icon(Icons.pause_circle_filled_rounded, size: 18)
+                            : (isPaused
+                                ? const Icon(Icons.play_circle_filled_rounded, size: 18)
+                                : const Icon(Icons.sync_rounded, size: 16))),
                     label: Text(
-                      isSyncing
-                          ? 'Pause Backup'
-                          : (service.pendingAssetsCount > 0
-                              ? 'Backup New (${service.pendingAssetsCount})'
-                              : 'Sync Camera Roll'),
+                      _isReceivingActive
+                          ? 'Server Busy (Receiving)'
+                          : (isSyncing
+                              ? 'Pause Backup'
+                              : (isPaused
+                                  ? 'Resume Backup'
+                                  : (service.pendingAssetsCount > 0
+                                      ? 'Backup New (${service.pendingAssetsCount})'
+                                      : 'Sync Camera Roll'))),
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                     ),
                   ),
