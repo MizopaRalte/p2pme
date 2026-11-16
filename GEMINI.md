@@ -74,3 +74,25 @@ A task or release is **ONLY COMPLETE** when:
 4. All assets are deployed live to Cloudflare Pages (`https://p2pme.pages.dev`).
 5. Live endpoints have been fetched via HTTP to verify that the remote CDN serves the exact expected content without stale caching.
 6. The official Git release tag (`vX.Y.Z`) is created and pushed to GitHub (`git push origin vX.Y.Z`), and the official GitHub Release is published with all binary assets (APK, IPA, Windows zip, and SHA-256 checksums).
+
+---
+
+## 5. Mandatory One-Command Release Automation (No Manual Steps)
+
+To guarantee that no future AI or developer ever misses a platform, forgets a Git tag, or skips publishing a GitHub Release:
+
+1. **Never perform manual, piecemeal release operations.**
+2. **Every release MUST be executed using the unified release pipeline:**
+   ```powershell
+   python scripts/release.py <version> "<release_notes>"
+   ```
+3. **Automated Enforcement:** The script enforces all mandatory gates sequentially:
+   - Version & build code bumping across `pubspec.yaml`, `main.dart`, `version.json`, and `index.html`.
+   - Local compilation and signing of the Android release APK.
+   - Synchronous Git commit and annotated tag creation (`vX.Y.Z`).
+   - Pushing both `main` branch and tags to GitHub in one command.
+   - Polling and retrieving the genuine macOS cloud-compiled iOS IPA from GitHub Actions.
+   - Exact byte-size and SHA-256 checksum generation across all packages.
+   - Edge deployment to Cloudflare Pages via Wrangler.
+   - Publishing the official GitHub Release with all 7 mandatory assets attached.
+   - Running `scripts/verify-release.py` to ensure 100% remote HTTP and asset verification before declaring success.
