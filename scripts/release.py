@@ -21,10 +21,10 @@ import subprocess
 import urllib.request
 
 def log(msg):
-    print(f"\n[RELEASE-ENGINE] >>> {msg}")
+    print(f"\n[RELEASE-ENGINE] >>> {msg}", flush=True)
 
 def error(msg):
-    print(f"\n[RELEASE-ERROR] ❌ {msg}", file=sys.stderr)
+    print(f"\n[RELEASE-ERROR] ❌ {msg}", file=sys.stderr, flush=True)
     sys.exit(1)
 
 def run(cmd, shell=True, check=True):
@@ -123,9 +123,13 @@ def main():
     # 7. Git commit, tag, and push
     log("Committing changes and pushing tag to trigger macOS cloud runner...")
     run("git add -A")
-    run(f'git commit -m "chore(release): v{new_version}"')
+    c_res = subprocess.run(f'git commit -m "chore(release): v{new_version}"', shell=True, text=True, capture_output=True)
+    if c_res.returncode != 0 and 'nothing to commit' not in c_res.stdout:
+        error(f"Commit failed with exit code {c_res.returncode}:\nStdout: {c_res.stdout}\nStderr: {c_res.stderr}")
+    
+    subprocess.run(f"git tag -d v{new_version}", shell=True, capture_output=True)
     run(f'git tag -a v{new_version} -m "Release v{new_version}: {release_notes}"')
-    run("git push origin main --tags")
+    run("git push origin main --tags --force")
 
     # 8. Poll GitHub Actions for macOS cloud runner build
     token = get_git_token()
@@ -141,7 +145,11 @@ def main():
         time.sleep(10)
         req = urllib.request.Request('https://api.github.com/repos/MizopaRalte/p2pme/actions/runs', headers=headers)
         runs_data = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
-        matching_runs = [r for r in runs_data.get('workflow_runs', []) if r.get('head_branch') == f'v{new_version}' or r.get('head_commit', {}).get('message', '').startswith(f'chore(release): v{new_version}')]
+        matching_runs = [
+            r for r in runs_data.get('workflow_runs', [])
+            if (r.get('head_branch') == f'v{new_version}' or r.get('head_commit', {}).get('message', '').startswith(f'chore(release): v{new_version}'))
+            and (r.get('status') != 'completed' or r.get('conclusion') == 'success')
+        ]
         
         if not matching_runs:
             print(f"Waiting for workflow run to register... ({attempt+1}/40)")

@@ -529,7 +529,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 8;
+  int _currentVersionCode = 9;
   String _currentVersionName = '1.0.7';
   bool _updateAvailable = false;
   String? _latestVersionName;

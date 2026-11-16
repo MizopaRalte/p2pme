@@ -1,10 +1,10 @@
 {
   "version": "1.0.7",
-  "version_code": 8,
+  "version_code": 9,
   "release_date": "2026-11-16",
   "release_notes": "Instant Camera QR Server Pairing: 1-tap connection between sender (iPhone/Android) and 24/7 Server Hub with automatic 256-bit token pairing, persistent auto-reconnect, and QR viewfinder scanner.",
   "apk_url": "https://p2pme.pages.dev/downloads/P2Pme-v1.0.7.apk",
-  "apk_sha256": "bbfb20a495dd80bd26b9bbce302d2c32bf459b27d029006cc0ab2dcdbccece56",
+  "apk_sha256": "5294f07a0078bad00c580c1cceee051e4d5524329d06d098215426aa25353163",
   "windows_url": "https://p2pme.pages.dev/downloads/P2Pme-Windows.zip",
   "windows_sha256": "0A659D054130C2E0559C76580CB1200C5AAACB6E4304F47B8B75B757C89C17DD",
   "ipa_url": "https://p2pme.pages.dev/downloads/P2Pme-v1.0.7.ipa",
