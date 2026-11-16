@@ -8,7 +8,7 @@
   "windows_url": "https://p2pme.pages.dev/downloads/P2Pme-Windows.zip",
   "windows_sha256": "0A659D054130C2E0559C76580CB1200C5AAACB6E4304F47B8B75B757C89C17DD",
   "ipa_url": "https://p2pme.pages.dev/downloads/P2Pme-v1.1.0.ipa",
-  "ipa_sha256": "a9475084b84f47a08c8e9f5d64671c91f20a5bc26c07a343af90f07eb846cdca",
+  "ipa_sha256": "eeaf5ce3f8c8fbb74f29840b8ae89adc42ee7b2e470e014202d1c7f6a71aec88",
   "altstore_source_url": "https://p2pme.pages.dev/altstore-source.json",
   "min_supported_version": 1
 }

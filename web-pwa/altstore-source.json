@@ -37,6 +37,24 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.1.0",
+          "buildVersion": "12",
+          "date": "2026-11-16",
+          "localizedDescription": "Release v1.1.0: Boundless camera roll scanning (no 500 limit), persistent server pairing state, dual LAN/WAN remote backup, and direct USB cable wire-speed transfer.",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.1.0.ipa",
+          "size": 7591163,
+          "sha256": "eeaf5ce3f8c8fbb74f29840b8ae89adc42ee7b2e470e014202d1c7f6a71aec88",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.0.9",
           "buildVersion": "11",
           "date": "2026-11-16",
