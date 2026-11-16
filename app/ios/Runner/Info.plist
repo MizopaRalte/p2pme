@@ -49,7 +49,7 @@
 		<string>_p2pme._udp</string>
 	</array>
 
-	<!-- Background Processing Modes for Resilio-Style Unattended Sync -->
+	<!-- Background Processing Modes for Continuous Unattended Sync -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

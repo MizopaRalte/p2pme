@@ -16,7 +16,7 @@
 **P2Pme** is a high-performance, decentralized data replication and drop engine. It combines two core workflows in a streamlined 3-tab experience:
 
 1. **🚀 Transfer Tab:** One-time, direct device-to-device transfers. Send camera photos or any files to nearby devices discovered automatically on your Wi-Fi network with 1-tap, or generate a 6-digit PIN and zero-install WebDrop link to send anywhere over the internet.
-2. **🔄 Backup Tab:** Continuous, Resilio-style background folder synchronization and Camera Roll auto-backup with Storage-Saver Archive Mode. Supports adding preset folders (Camera Roll, WhatsApp) or any custom folder, viewing file counts and sync speeds, sharing folder QR tickets, and safely removing folders from sync.
+2. **🔄 Backup Tab:** Continuous background folder synchronization and Camera Roll auto-backup with Storage-Saver Archive Mode. Supports adding preset folders (Camera Roll, WhatsApp) or any custom folder, viewing file counts and sync speeds, sharing folder QR tickets, and safely removing folders from sync.
 3. **🖥️ Server Tab:** Turn any phone, PC, Mac, or NAS into a dedicated 24/7 backup hub and receiver. Customize where received files and backups are stored, view real-time LAN socket addresses, display master pairing QR codes, and monitor battery optimization.
 4. **Portable Windows Desktop App:** Zero installation required. Simply download, extract, and launch `p2pme_app.exe` (or `Launch_P2Pme.cmd`) for full desktop GUI and background replication.
 5. **Zero-Install WebDrop & PWA:** Built-in local upload portal and standalone Cloudflare Pages Web PWA. Any iPhone, iPad, PC, or guest can send/receive files over Wi-Fi simply by opening the web app—**zero app installation required** and **auto-updates on every launch**.
@@ -31,7 +31,7 @@
 * **6-Digit PIN & WebDrop Over Internet:** Send to any device worldwide with a 6-digit PIN code or zero-install browser link (`https://p2pme.pages.dev`).
 * **Self-Destructing Ephemeral Security:** 3 incorrect PIN attempts wipe the session instantly; sessions automatically expire in 10 minutes.
 
-### 🔄 2. Backup Tab: Continuous Resilio-Style Sync
+### 🔄 2. Backup Tab: Continuous Background Sync
 * **Instant Camera QR Server Pairing:** 1-tap connection to your 24/7 Server Hub. Tap "Scan Server QR Code" on your sending phone (e.g. iPhone) and point at the Server Hub screen (e.g. Android phone or PC). Automatically parses IP, port, remote WAN address, and 256-bit CSPRNG security tokens for instantaneous zero-typing pairing.
 * **Multi-Transport Connection Tiers:**
   * **⚡ Tier 1 (Direct USB Cable):** Hardware wire speed (35–400+ MB/s) with 0% packet loss and zero Wi-Fi required via USB tethering / USB-to-USB link.

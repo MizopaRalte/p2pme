@@ -12,7 +12,7 @@
 flowchart TD
     subgraph UI_Layer ["Surface Layer (Flutter Mobile & Desktop Shell)"]
         Tab1["🚀 Transfer Tab\n(1-Time Nearby Beam & Internet PIN Drop)"]
-        Tab2["🔄 Backup Tab\n(Resilio-Style Continuous Sync & Folder Watchers)"]
+        Tab2["🔄 Backup Tab\n(Continuous Folder Sync & Folder Watchers)"]
         Tab3["🖥️ Server Tab\n(24/7 Dedicated Hub & Custom Destination Picker)"]
         FGS["Android Foreground Service (Keep-Alive & Battery Whitelist)"]
         Tab2 --> FGS
