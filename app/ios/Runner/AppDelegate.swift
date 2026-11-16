@@ -50,7 +50,8 @@ import Photos
         result(status == .authorized || status == .limited)
       case "getAssetCount":
         let fetchOptions = PHFetchOptions()
-        fetchOptions.predicate = NSPredicate(format: "(mediaSubtype & %d) == 0", PHAssetMediaSubtype.photoScreenshot.rawValue)
+        let excludedSubtypes = PHAssetMediaSubtype.photoScreenshot.rawValue | PHAssetMediaSubtype.videoScreenRecording.rawValue
+        fetchOptions.predicate = NSPredicate(format: "(mediaSubtype & %d) == 0", excludedSubtypes)
         let fetchResult = PHAsset.fetchAssets(with: fetchOptions)
         result(fetchResult.count)
       case "getAssets":
@@ -60,8 +61,9 @@ import Photos
         
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        let excludedSubtypes = PHAssetMediaSubtype.photoScreenshot.rawValue | PHAssetMediaSubtype.videoScreenRecording.rawValue
         var predicates: [NSPredicate] = [
-          NSPredicate(format: "(mediaSubtype & %d) == 0", PHAssetMediaSubtype.photoScreenshot.rawValue)
+          NSPredicate(format: "(mediaSubtype & %d) == 0", excludedSubtypes)
         ]
         if let since = sinceTimestamp, since > 0 {
           let date = Date(timeIntervalSince1970: since / 1000.0)
@@ -128,6 +130,13 @@ import Photos
             "free_bytes": Int64(0),
             "total_bytes": Int64(0),
           ])
+        }
+      case "getDeviceName":
+        let name = UIDevice.current.name
+        if !name.isEmpty {
+          result(name)
+        } else {
+          result(UIDevice.current.model)
         }
       default:
         result(FlutterMethodNotImplemented)

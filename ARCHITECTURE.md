@@ -257,7 +257,33 @@ sequenceDiagram
 
 1. **Native Storage Telemetry:** Servers query real-time filesystem metrics (`StatFs` on Android, `resourceValues` on iOS) and publish available space in `/api/info`. Senders visualize destination capacity before initiating transfers (`Server Storage: 42.2 GB Free`).
 2. **Graceful Out-of-Space Protocol (HTTP 507):** If disk space is exhausted during ingestion, the server aborts writing, deletes partial chunks, returns `HTTP 507 Insufficient Storage`, and displays a device full banner.
-3. **Automated Polling & Resume Loop:** The sender transitions to `serverStorageFull`, pauses the upload stream without desynchronizing state, and queries the receiver's `/api/info` every 5 seconds. As soon as the user clears space on the receiver (e.g. via Google Photos "Free up device storage"), the sender automatically detects the freed capacity and resumes transfer from the exact interrupted item.
+3. **Automated Polling & Resume Loop:** The sender transitions to `serverStorageFull`, pauses the upload stream without desynchronizing state, and queries the receiver's `/api/info` every 5 seconds (capped at 5 minutes to prevent infinite loops). As soon as the user clears space on the receiver (e.g. via Google Photos "Free up device storage"), the sender automatically detects the freed capacity and resumes transfer from the exact interrupted item.
+
+---
+
+## 11. Dynamic Device Naming & Symmetrical Role Isolation
+
+```mermaid
+flowchart TD
+    subgraph S["Sender Role (Tab 2: Backup)"]
+        S_Name["Dynamic Hardware Name\n(e.g., iPhone 15 Pro)"]
+        S_Telemetry["Symmetrical Telemetry:\n• 'Uploading to Google Pixel 7 Pro'\n• 'Sending file 12 of 596'\n• '1.25 GB sent of 5.00 GB (25%)'\n• 'Uploading: 78.4 MB/s'\n• 'Receiver has 42.2 GB Free'"]
+        S_Ctrl["Controls: [Pause Backup] / [Resume Backup]"]
+    end
+
+    subgraph R["Receiver Role (Tab 3: Server Hub)"]
+        R_Name["Dynamic Hardware Name\n(e.g., Google Pixel 7 Pro)"]
+        R_Telemetry["Symmetrical Telemetry:\n• 'Downloading from iPhone 15 Pro'\n• 'Receiving file 12 of 596'\n• '1.25 GB received of 5.00 GB (25%)'\n• 'Downloading: 78.4 MB/s'\n• 'Storage Remaining: 42.2 GB Free'"]
+        R_Ctrl["Controls: Informational Lock (No Pause Button)"]
+    end
+
+    S_Name -->|X-Sender-Device-Name header| R_Telemetry
+    R_Name -->|GET /api/info device_name| S_Telemetry
+```
+
+1. **Native OS Identity Extraction:** Device names are retrieved dynamically via platform channels (`Settings.Global.DEVICE_NAME` on Android, `UIDevice.current.name` on iOS, `COMPUTERNAME` on Windows) and passed through UDP beacons and `X-Sender-Device-Name` HTTP headers.
+2. **Symmetrical User Clarity:** Senders always see upload speeds and sent metrics directed at the specific receiver; receivers always see download speeds and received metrics originating from the specific sender.
+3. **Sender-Exclusive Pause Control:** In Server Mode, the receiver functions as an automated ingestion daemon. Senders retain exclusive control over pausing and resuming backups to eliminate two-way state conflicts.
 
 
 

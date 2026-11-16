@@ -84,6 +84,12 @@
   * **Storage Pre-Flight Protection:** Prior to writing incoming file streams, the server verifies remaining disk capacity via native APIs (`StatFs` on Android, `volumeAvailableCapacityForImportantUsageKey` on iOS). Ingestion is rejected with `HTTP 507 Insufficient Storage` if free space is below safety margins (< 50 MB).
   * **Atomic Cleanup on Exception:** If an out-of-space event occurs mid-stream, partial file handles are closed and immediately unlinked/deleted from disk, preventing rogue disk consumption and allowing the client to gracefully auto-pause and auto-resume once space is cleared.
 
+### K. Zero Key Leakage in Discovery & Polling Safety
+* **Risk:** Information disclosure of cryptographic material via unauthenticated discovery endpoints; client battery and network exhaustion during extended disk-full events.
+* **Mitigation:**
+  * **Complete Secret Key Isolation:** The unauthenticated `/api/info` discovery probe returns boolean configuration flags (`hub_configured: true`) only. All partial key hints (`hub_key_hint`) have been completely eradicated, preventing LAN attackers from reducing cryptographic entropy.
+  * **Bounded Polling Windows:** Storage retry loops on HTTP 507 are bounded to 60 iterations (5 minutes maximum), terminating cleanly with persistent user feedback rather than hanging in infinite network polling loops.
+
 
 ---
 

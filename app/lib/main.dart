@@ -374,14 +374,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       id: 'photos-sync',
       name: 'Camera & Photos',
       localPath: Platform.isIOS ? 'Apple Photo Library' : '/storage/emulated/0/DCIM/Camera',
-      status: 'Live Sync Active',
+      status: 'Ready',
       connectionTier: 'DIRECT LAN',
       syncMode: 'ARCHIVE (STORAGE SAVER)',
-      fileCount: 342,
-      totalSizeMb: 1420.5,
-      speedMb: 78.4,
+      fileCount: 0,
+      totalSizeMb: 0.0,
+      speedMb: 0.0,
     ),
   ];
+
+  // Dynamic Device Name
+  String _myDeviceName = 'P2Pme Device';
+  String? _customDeviceName;
+  String? _serverBindError;
+  String? _receivingSenderDeviceName;
 
   // Quick Drop State
   int _quickDropTab = 0; // 0 = Send, 1 = Receive
@@ -435,6 +441,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _localStorageTotalBytes = 0;
   bool _isReceiverStorageFull = false;
 
+  Future<void> _initDeviceName() async {
+    if (_customDeviceName != null && _customDeviceName!.trim().isNotEmpty) {
+      if (mounted) setState(() => _myDeviceName = _customDeviceName!.trim());
+      return;
+    }
+    try {
+      final nativeName = await CameraBackupService.instance.getNativeDeviceName();
+      if (nativeName != null && nativeName.trim().isNotEmpty) {
+        if (mounted) setState(() => _myDeviceName = nativeName.trim());
+        return;
+      }
+    } catch (_) {}
+
+    String fallback = 'P2Pme Device';
+    if (Platform.isWindows) {
+      fallback = Platform.environment['COMPUTERNAME'] ?? 'Windows PC';
+    } else if (Platform.isMacOS) {
+      fallback = Platform.environment['HOSTNAME'] ?? Platform.localHostname;
+    } else if (Platform.isLinux) {
+      fallback = Platform.environment['HOSTNAME'] ?? Platform.localHostname;
+    } else if (Platform.isAndroid) {
+      fallback = 'Android Device';
+    } else if (Platform.isIOS) {
+      fallback = 'iPhone';
+    }
+    if (mounted) setState(() => _myDeviceName = fallback);
+  }
+
   Future<void> _loadAppConfig() async {
     try {
       final baseDir = _getAppBaseDirectory();
@@ -443,6 +477,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final content = await configFile.readAsString();
         if (content.trim().isNotEmpty) {
           final json = jsonDecode(content) as Map<String, dynamic>;
+          if (json.containsKey('customDeviceName') && json['customDeviceName'] is String) {
+            final custom = json['customDeviceName'] as String;
+            if (custom.trim().isNotEmpty) {
+              _customDeviceName = custom.trim();
+              _myDeviceName = custom.trim();
+            }
+          }
           if (json.containsKey('receiveDestination') && json['receiveDestination'] is String) {
             final dest = json['receiveDestination'] as String;
             if (dest.isNotEmpty) {
@@ -483,7 +524,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       final configFile = File('$baseDir${Platform.pathSeparator}.p2pme_config.json');
       final json = {
-        'version': '1.2.0',
+        'version': '1.2.1',
+        'customDeviceName': _customDeviceName,
         'receiveDestination': _receiveDestination,
         'wifiOnlySync': _wifiOnlySync,
         'backgroundSyncEnabled': _backgroundSyncEnabled,
@@ -651,6 +693,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   RawDatagramSocket? _beaconSocket;
   Timer? _beaconTimer;
   Timer? _nearbyScanTimer;
+  Timer? _initialScanTimer;
   final List<NearbyPeer> _nearbyPeers = [];
   NearbyPeer? _savedPairedServer;
   String? _serverRemoteWanUrl;
@@ -659,8 +702,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 14;
-  String _currentVersionName = '1.2.0';
+  int _currentVersionCode = 15;
+  String _currentVersionName = '1.2.1';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -959,16 +1002,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadAppConfig();
+    _initDeviceName();
     _checkLocalStorageSpace();
     _webDropSessionToken = _generateSessionToken();
     _initHubSecret();
     _initServerWanUrl();
-    if (Platform.isAndroid) {
-      final sampleImg = File('/sdcard/Pictures/Screenshots/Screenshot_20260622-194857.jpg');
-      if (sampleImg.existsSync() && _selectedFilePaths.isEmpty) {
-        _selectedFilePaths.add(sampleImg.path);
-      }
-    }
     _initEngine();
     _checkBackgroundServiceStatus();
     _startWebDropServer();
@@ -990,6 +1028,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _initialScanTimer?.cancel();
     _periodicUpdateTimer?.cancel();
     _beaconSocket?.close();
     _beaconTimer?.cancel();
@@ -1018,7 +1057,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _nearbyScanTimer = Timer.periodic(const Duration(seconds: 6), (_) {
         _scanNearby();
       });
-      Future.delayed(const Duration(milliseconds: 600), _scanNearby);
+      _initialScanTimer = Timer(const Duration(milliseconds: 600), () {
+        if (mounted) _scanNearby();
+      });
     } catch (e) {
       debugPrint('Beacon socket bind error: $e');
     }
@@ -1027,8 +1068,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _broadcastSelfBeacon() {
     if (_beaconSocket == null || _localIpAddress == null) return;
     try {
-      final myName = Platform.isAndroid ? 'OnePlus 6T' : (Platform.isWindows ? "Tony's Windows PC" : 'P2Pme Device');
-      final myType = Platform.isAndroid ? 'android' : (Platform.isWindows ? 'pc' : 'other');
+      final myName = _myDeviceName;
+      final myType = Platform.isAndroid ? 'android' : (Platform.isIOS ? 'ios' : (Platform.isWindows ? 'pc' : 'other'));
       final payload = jsonEncode({
         'p2pme_beacon': true,
         'device_name': myName,
@@ -1656,7 +1697,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       req.write(jsonEncode({
         'ticket': ticket,
         'folder_name': folder.name,
-        'device_name': Platform.isAndroid ? 'OnePlus 6T' : 'Windows PC',
+        'device_name': _myDeviceName,
       }));
       final resp = await req.close();
       if (resp.statusCode == HttpStatus.ok) {
@@ -1707,6 +1748,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         token: token,
         wanHost: activePeer.wanHost ?? _savedPairedServer?.wanHost,
         wanPort: activePeer.wanPort ?? _savedPairedServer?.wanPort,
+        senderDeviceName: _myDeviceName,
+        wifiOnly: _wifiOnlySync,
+        isUsbConnected: _isUsbCableConnected,
       );
 
       if (transferred > 0 && mounted) {
@@ -1731,7 +1775,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     final targetPeer = _nearbyPeers.isNotEmpty
         ? _nearbyPeers.firstWhere(
-            (p) => p.deviceType.toLowerCase() == 'android' || p.name.toLowerCase().contains('oneplus') || p.deviceType.toLowerCase() == 'pc',
+            (p) => p.isPaired || p.deviceType.toLowerCase() == 'android' || p.deviceType.toLowerCase() == 'pc',
             orElse: () => _nearbyPeers.first,
           )
         : _savedPairedServer;
@@ -1760,6 +1804,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       token: token,
       wanHost: targetPeer.wanHost ?? _savedPairedServer?.wanHost,
       wanPort: targetPeer.wanPort ?? _savedPairedServer?.wanPort,
+      senderDeviceName: _myDeviceName,
+      wifiOnly: _wifiOnlySync,
+      isUsbConnected: _isUsbCableConnected,
       onProgress: (cur, tot, filename) {
         if (mounted) setState(() {});
       },
@@ -1846,19 +1893,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _webDropServer = server;
         _isWebDropServerRunning = true;
+        _serverBindError = null;
       });
       server.listen(_handleWebDropRequest);
     } catch (e) {
       debugPrint('Failed to start WebDrop HTTP server: $e');
+      if (mounted) {
+        setState(() {
+          _isWebDropServerRunning = false;
+          _serverBindError = 'Port $_webDropPort is unavailable: $e';
+        });
+      }
     }
   }
 
   Future<void> _stopWebDropServer() async {
     await _webDropServer?.close(force: true);
-    setState(() {
-      _webDropServer = null;
-      _isWebDropServerRunning = false;
-    });
+    _webDropServer = null;
+    _isWebDropServerRunning = false;
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _handleWebDropRequest(HttpRequest request) async {
@@ -1876,8 +1931,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // GET /api/info -> Discovery probe
     if (request.method == 'GET' && request.uri.path == '/api/info') {
       request.response.headers.contentType = ContentType.json;
-      final myName = Platform.isAndroid ? 'OnePlus 6T' : (Platform.isWindows ? "Tony's Windows PC" : 'P2Pme Device');
-      final myType = Platform.isAndroid ? 'android' : (Platform.isWindows ? 'pc' : 'other');
+      final myName = _myDeviceName;
+      final myType = Platform.isAndroid ? 'android' : (Platform.isIOS ? 'ios' : (Platform.isWindows ? 'pc' : 'other'));
       final storage = await CameraBackupService.instance.getStorageSpace();
       final freeBytes = storage['free_bytes'] ?? 0;
       final totalBytes = storage['total_bytes'] ?? 0;
@@ -1891,7 +1946,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'has_camera_backup': _folders.isNotEmpty,
         'backup_ticket': _folders.isNotEmpty ? _getFolderTicket(_folders[0]) : null,
         'hub_auth_required': true,
-        'hub_key_hint': _hubSecretKey != null && _hubSecretKey!.length >= 8 ? '${_hubSecretKey!.substring(0, 8)}...' : null,
+        'hub_configured': _hubSecretKey != null && _hubSecretKey!.isNotEmpty,
         'storage': {
           'free_bytes': freeBytes,
           'total_bytes': totalBytes,
@@ -2209,11 +2264,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final totalBatchFiles = int.tryParse(request.headers.value('X-Total-Files') ?? request.uri.queryParameters['totalFiles'] ?? '0') ?? 0;
       final batchTotalBytes = int.tryParse(request.headers.value('X-Batch-Total-Bytes') ?? request.uri.queryParameters['batchTotal'] ?? '0') ?? 0;
       final batchBytesSent = int.tryParse(request.headers.value('X-Batch-Bytes-Sent') ?? request.uri.queryParameters['batchSent'] ?? '0') ?? 0;
+      final senderName = request.headers.value('X-Sender-Device-Name') ?? request.uri.queryParameters['senderDevice'] ?? 'Connected Sender';
 
       if (mounted) {
         setState(() {
           _isReceivingActive = true;
           _receivingFileName = safeName;
+          _receivingSenderDeviceName = senderName;
           _receivingSpeedMBps = 0.0;
           _receivingProgressRatio = 0.0;
           _receivingCurrentFileIndex = fileIndex;
@@ -2854,7 +2911,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final fileName = path.split(Platform.pathSeparator).last;
       try {
         final tokenToSend = peer.authToken ?? _webDropSessionToken;
-        final url = Uri.parse('http://${peer.ip}:${peer.port}/upload?name=${Uri.encodeComponent(fileName)}&token=$tokenToSend&fileIndex=${sent + 1}&totalFiles=$total&batchTotal=$totalBytes&batchSent=$totalBytesSent');
+        final url = Uri.parse('http://${peer.ip}:${peer.port}/upload?name=${Uri.encodeComponent(fileName)}&token=$tokenToSend&fileIndex=${sent + 1}&totalFiles=$total&batchTotal=$totalBytes&batchSent=$totalBytesSent&senderDevice=${Uri.encodeComponent(_myDeviceName)}');
         final req = await client.postUrl(url);
         final len = await file.length();
         req.headers.contentLength = len;
@@ -2863,6 +2920,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         req.headers.set('X-Total-Files', total.toString());
         req.headers.set('X-Batch-Total-Bytes', totalBytes.toString());
         req.headers.set('X-Batch-Bytes-Sent', totalBytesSent.toString());
+        req.headers.set('X-Sender-Device-Name', _myDeviceName);
 
         final Stopwatch sampleWatch = Stopwatch()..start();
         int bytesSinceSample = 0;
@@ -3009,6 +3067,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 12),
 
+          // Server Port Error Alert Banner
+          if (_serverBindError != null) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.amber.shade700, width: 1.5),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Server Port Conflict',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: isDark ? Colors.amber.shade200 : Colors.amber.shade900,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _serverBindError!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? Colors.amber.shade300 : Colors.amber.shade800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           // Receiver Storage Full Alert Banner
           if (_isReceiverStorageFull) ...[
             Container(
@@ -3116,8 +3216,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             Text(
                               _isReceivingActive
                                   ? (_receivingTotalFiles > 0
-                                      ? 'Downloading file $_receivingCurrentFileIndex of $_receivingTotalFiles'
-                                      : 'Downloading Incoming File...')
+                                      ? 'Downloading from ${_receivingSenderDeviceName ?? "Sender"} • File $_receivingCurrentFileIndex of $_receivingTotalFiles'
+                                      : 'Downloading from ${_receivingSenderDeviceName ?? "Sender"}...')
                                   : 'Receiver Ingestion Status',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
@@ -3130,7 +3230,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             const SizedBox(height: 2),
                             Text(
                               _isReceivingActive && _receivingFileName != null
-                                  ? 'Saving: $_receivingFileName'
+                                  ? 'Saving: $_receivingFileName • Direct download'
                                   : 'Total: $_receivedFiles files (${CameraBackupService.formatBytes(_receivedBytes)}) ingested',
                               style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                               overflow: TextOverflow.ellipsis,
@@ -4961,12 +5061,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (isPaired) ...[
                   IconButton.outlined(
                     tooltip: 'Reconnect / Ping Server',
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    icon: const Icon(Icons.refresh_rounded, size: 20),
                     style: IconButton.styleFrom(
                       foregroundColor: GooglePhotosColors.blue,
                       side: BorderSide(color: GooglePhotosColors.blue.withValues(alpha: 0.5)),
-                      padding: const EdgeInsets.all(7),
-                      minimumSize: const Size(34, 34),
+                      padding: const EdgeInsets.all(12),
+                      minimumSize: const Size(48, 48),
                     ),
                     onPressed: () async {
                       final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
@@ -5572,6 +5672,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isStorageFull = service.state == CameraBackupState.serverStorageFull;
     final isUpToDate = service.state == CameraBackupState.upToDate && service.pendingAssetsCount == 0;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final targetPeer = _savedPairedServer ??
+        (_nearbyPeers.isNotEmpty
+            ? _nearbyPeers.firstWhere((p) => p.isPaired, orElse: () => _nearbyPeers.first)
+            : null);
 
     return Card(
       elevation: 2,
@@ -5661,7 +5765,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         isStorageFull
                             ? 'Receiver is out of storage. Transfer will auto-resume once space is cleared.'
                             : (isSyncing && service.currentSyncingFilename != null
-                                ? 'Sending ${service.currentSyncIndex} of ${service.pendingAssetsCount} files • ${service.currentSyncingFilename}'
+                                ? 'Uploading to ${targetPeer?.name ?? "Server"} • File ${service.currentSyncIndex} of ${service.pendingAssetsCount} (${service.currentSyncingFilename})'
                                 : (isPaused
                                     ? 'Backup paused (${service.formattedBatchBytes}) • Tap "Resume Backup" to continue'
                                     : (service.totalDeviceAssets > 0

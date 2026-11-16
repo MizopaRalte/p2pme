@@ -210,6 +210,11 @@ class CameraBackupService {
                     !name.contains('.trashed') &&
                     !lower.contains('screenshot') &&
                     !entity.path.toLowerCase().contains('screenshot') &&
+                    !lower.contains('screen_record') &&
+                    !lower.contains('screenrecord') &&
+                    !lower.contains('screen-record') &&
+                    !entity.path.toLowerCase().contains('screen_record') &&
+                    !entity.path.toLowerCase().contains('screenrecord') &&
                     (lower.endsWith('.jpg') ||
                      lower.endsWith('.jpeg') ||
                      lower.endsWith('.png') ||
@@ -323,6 +328,9 @@ class CameraBackupService {
     required String token,
     String? wanHost,
     int? wanPort,
+    String? senderDeviceName,
+    bool wifiOnly = false,
+    bool isUsbConnected = false,
     Function(int current, int total, String filename)? onProgress,
   }) async {
     _isSyncPaused = false;
@@ -331,6 +339,18 @@ class CameraBackupService {
       _state = CameraBackupState.upToDate;
       _stateController.add(_state);
       return 0;
+    }
+
+    if (wifiOnly && !isUsbConnected) {
+      // If target peer is not a LAN IP and wifi-only is required, abort sync
+      final isLan = peerIp.startsWith('192.168.') || peerIp.startsWith('10.') || peerIp.startsWith('172.');
+      if (!isLan && (wanHost == null || wanHost.isEmpty || peerIp == wanHost)) {
+        debugPrint('[CameraBackup] Wi-Fi Only sync is active. Skipping non-LAN host: $peerIp');
+        _lastError = 'Wi-Fi Only sync is enabled. Connect to local Wi-Fi to sync.';
+        _state = CameraBackupState.idle;
+        _stateController.add(_state);
+        return 0;
+      }
     }
 
     _state = CameraBackupState.syncing;
@@ -345,17 +365,21 @@ class CameraBackupService {
 
     // Fast probe to verify if LAN peerIp is directly reachable. If not and wanHost is provided, switch to WAN
     if (wanHost != null && wanHost.isNotEmpty && wanHost != peerIp) {
-      try {
-        final probeClient = HttpClient()..connectionTimeout = const Duration(seconds: 2);
-        final req = await probeClient.getUrl(Uri.parse('http://$peerIp:$peerPort/api/info'));
-        final resp = await req.close();
-        if (resp.statusCode != HttpStatus.ok) {
+      if (wifiOnly && !isUsbConnected) {
+        debugPrint('[CameraBackup] LAN peer unreachable. Wi-Fi Only sync prevents falling back to WAN.');
+      } else {
+        try {
+          final probeClient = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+          final req = await probeClient.getUrl(Uri.parse('http://$peerIp:$peerPort/api/info'));
+          final resp = await req.close();
+          if (resp.statusCode != HttpStatus.ok) {
+            activeHost = wanHost;
+            activePort = wanPort ?? peerPort;
+          }
+        } catch (_) {
           activeHost = wanHost;
           activePort = wanPort ?? peerPort;
         }
-      } catch (_) {
-        activeHost = wanHost;
-        activePort = wanPort ?? peerPort;
       }
     }
 
@@ -401,7 +425,8 @@ class CameraBackupService {
       for (int attempt = 0; attempt < 2; attempt++) {
         try {
           final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
-          final url = Uri.parse('http://$activeHost:$activePort/upload?name=${Uri.encodeComponent(item.filename)}&token=$token&fileIndex=${i + 1}&totalFiles=${pending.length}&batchTotal=$_batchTotalBytes&batchSent=$_batchBytesSent');
+          final senderParam = (senderDeviceName != null && senderDeviceName.isNotEmpty) ? '&senderDevice=${Uri.encodeComponent(senderDeviceName)}' : '';
+          final url = Uri.parse('http://$activeHost:$activePort/upload?name=${Uri.encodeComponent(item.filename)}&token=$token&fileIndex=${i + 1}&totalFiles=${pending.length}&batchTotal=$_batchTotalBytes&batchSent=$_batchBytesSent$senderParam');
           final req = await client.postUrl(url);
 
           req.headers.contentLength = len;
@@ -410,6 +435,9 @@ class CameraBackupService {
           req.headers.set('X-Total-Files', pending.length.toString());
           req.headers.set('X-Batch-Total-Bytes', _batchTotalBytes.toString());
           req.headers.set('X-Batch-Bytes-Sent', _batchBytesSent.toString());
+          if (senderDeviceName != null && senderDeviceName.isNotEmpty) {
+            req.headers.set('X-Sender-Device-Name', senderDeviceName);
+          }
 
           int bytesSentThisFile = 0;
           final Stopwatch sampleWatch = Stopwatch()..start();
@@ -454,7 +482,13 @@ class CameraBackupService {
               _stateController.add(_state);
               _batchBytesSent = (_batchBytesSent - _currentFileBytesSent).clamp(0, _batchTotalBytes);
               _currentFileBytesSent = 0;
-              await _waitForReceiverStorageAvailable(activeHost, activePort);
+              final resumed = await _waitForReceiverStorageAvailable(activeHost, activePort);
+              if (!resumed) {
+                _lastError = 'Receiver storage wait timed out (5 minutes). Please free up space on receiver.';
+                _state = CameraBackupState.serverStorageFull;
+                _stateController.add(_state);
+                break;
+              }
               _isServerStorageFull = false;
               _state = CameraBackupState.syncing;
               _stateController.add(_state);
@@ -470,11 +504,15 @@ class CameraBackupService {
           // If retrying, rewind batch bytes sent for this attempt
           _batchBytesSent = (_batchBytesSent - _currentFileBytesSent).clamp(0, _batchTotalBytes);
           _currentFileBytesSent = 0;
-          // If LAN failed and WAN is available, switch active endpoint to WAN and retry once
+          // If LAN failed and WAN is available, switch active endpoint to WAN and retry once if wifiOnly allows
           if (attempt == 0 && wanHost != null && wanHost.isNotEmpty && activeHost != wanHost) {
-            activeHost = wanHost;
-            activePort = wanPort ?? peerPort;
-            continue;
+            if (wifiOnly && !isUsbConnected) {
+              debugPrint('[CameraBackup] Wi-Fi Only sync prevents WAN retry.');
+            } else {
+              activeHost = wanHost;
+              activePort = wanPort ?? peerPort;
+              continue;
+            }
           }
         }
         break;
@@ -508,10 +546,13 @@ class CameraBackupService {
     _stateController.add(_state);
   }
 
-  Future<void> _waitForReceiverStorageAvailable(String host, int port) async {
-    while (!_isSyncPaused) {
+  Future<bool> _waitForReceiverStorageAvailable(String host, int port) async {
+    int attempts = 0;
+    const maxAttempts = 60; // 5 minutes max (60 iterations * 5 seconds)
+    while (!_isSyncPaused && attempts < maxAttempts) {
       await Future.delayed(const Duration(seconds: 5));
-      if (_isSyncPaused) break;
+      attempts++;
+      if (_isSyncPaused) return false;
       try {
         final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
         final req = await client.getUrl(Uri.parse('http://$host:$port/api/info'));
@@ -523,13 +564,29 @@ class CameraBackupService {
           final freeBytes = (storage?['free_bytes'] as num?)?.toInt() ?? 0;
           if (freeBytes > 200 * 1024 * 1024) { // At least 200 MB free
             debugPrint('[CameraBackup] Receiver storage freed ($freeBytes bytes available). Resuming sync!');
-            return;
+            return true;
           }
         }
       } catch (e) {
         debugPrint('[CameraBackup] Waiting for receiver storage probe error: $e');
       }
     }
+    return false;
+  }
+
+  Future<String?> getNativeDeviceName() async {
+    try {
+      if (Platform.isIOS) {
+        final res = await _iosChannel.invokeMethod<String>('getDeviceName');
+        if (res != null && res.isNotEmpty) return res;
+      } else if (Platform.isAndroid) {
+        final res = await _bgChannel.invokeMethod<String>('getDeviceName');
+        if (res != null && res.isNotEmpty) return res;
+      }
+    } catch (e) {
+      debugPrint('[CameraBackup] Error getting native device name: $e');
+    }
+    return null;
   }
 
   Future<bool> openUrl(String url) async {

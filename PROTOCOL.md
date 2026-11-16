@@ -206,6 +206,7 @@ Sender (Client)                                          Receiver (24/7 Hub)
       |                                                         |
       | --- POST /upload?name=<file>&token=<key> -------------> |
       |     Headers: Content-Length, Content-Type: binary       | (Read Content-Length)
+      |              X-Sender-Device-Name: iPhone 15 Pro        | (Extract Sender Device Name)
       |              X-File-Index: 12                           | (Extract File Index & Total)
       |              X-Total-Files: 596                         | 
       |              X-Batch-Total-Bytes: 5242880000            | (Extract Total Batch Size)
@@ -223,7 +224,8 @@ Sender (Client)                                          Receiver (24/7 Hub)
 ```
 * **Real-time Velocity:** Measured over 200–250ms delta windows using high-precision monotonic timers.
 * **Batch Telemetry:** Both peers maintain synchronized batch progress in bytes and gigabytes so users know exact remaining data volume and completion percentages.
-* **Pause Abort Semantics:** When the sender taps "Pause Backup", the client issues `request.abort()` or finishes the active chunk cleanly, stopping the stream without corrupting state. In Server Mode, pause controls are restricted to the sender to prevent desynchronization.
+* **Symmetrical Telemetry Labels:** Senders explicitly display upload speed (`Uploading X MB/s`) and batch sent (`X MB sent of Y Total MB`); receivers explicitly display download speed (`Downloading X MB/s`) and batch received (`X MB received of Y Total MB`).
+* **Pause Abort Semantics:** When the sender taps "Pause Backup", the client issues `request.abort()` or finishes the active chunk cleanly, stopping the stream without corrupting state. In Server Mode, pause controls are strictly restricted to the sender to prevent desynchronization.
 
 ---
 
@@ -238,6 +240,7 @@ Servers query native filesystem APIs (`StatFs` on Android, `resourceValues(forKe
   "device_type": "android",
   "ip": "192.168.1.105",
   "port": 45455,
+  "hub_configured": true,
   "storage": {
     "free_bytes": 45298483200,
     "total_bytes": 128000000000,
@@ -246,6 +249,7 @@ Servers query native filesystem APIs (`StatFs` on Android, `resourceValues(forKe
 }
 ```
 * **Sender Pre-flight Warning:** If `batchTotalBytes > free_bytes`, the sender displays an amber alert chip warning that the receiver's disk capacity is lower than the queued batch size.
+* **Zero Secret Leakage:** `hub_key_hint` has been eliminated; the endpoint only exposes a boolean `hub_configured`.
 
 ### B. Out-of-Space Negotiation Sequence (`HTTP 507 Insufficient Storage`)
 When the receiver filesystem is exhausted or remaining space drops below buffer thresholds:
@@ -259,20 +263,30 @@ Sender (Client)                                          Receiver (24/7 Hub)
       |                                                         |
       | (Transition to CameraBackupState.serverStorageFull)     |
       | (Show UI: PAUSED (RECEIVER FULL))                       |
-      | (Poll GET /api/info every 5 seconds)                   |
+      | (Poll GET /api/info every 5 seconds, max 60 attempts)   |
       | --- GET /api/info ------------------------------------> | (User taps "Free up space" in
       | <--- 200 OK (storage.free_bytes: 42 GB) --------------- |  Google Photos on Receiver)
       |                                                         |
       | (Auto-Resume: re-issue POST /upload for failed file)    |
       | --- POST /upload?name=<file>&token=<key> -------------> |
 ```
+* **Timeout Protection:** If storage is not freed within 5 minutes (60 poll cycles @ 5s), the client times out cleanly and surfaces a persistent error banner, preventing infinite polling loops.
 
 ---
 
-## 10. Native Screenshot Filtering & Configuration Persistence
+## 10. Native Screenshot & Screen Recording Filtering & Configuration Persistence
 
-* **Screenshot Exclusion:** Native PhotoKit queries enforce `(mediaSubtype & PHAssetMediaSubtype.photoScreenshot) == 0`. Android filesystem scans filter out paths and filenames matching `*screenshot*`.
+* **Screenshot & Screen Recording Exclusion:** Native PhotoKit queries enforce `(mediaSubtype & (PHAssetMediaSubtype.photoScreenshot | PHAssetMediaSubtype.videoScreenRecording)) == 0`. Android filesystem scans filter out paths and filenames matching `*screenshot*` or `*screen_record*` / `*screenrecord*`.
 * **Permanent Storage Persistence:** All synced asset indexes (`p2pme_synced_camera_assets.json`) and configuration profiles (`.p2pme_config.json`) are stored in `$HOME/Documents/` (iOS) and `/data/data/net.p2pme.p2pme_app/files/` (Android), which are protected from OS cache purges and survive app updates.
+
+---
+
+## 11. Dynamic Device Naming Across Platforms
+
+* **Android Native:** Queries `Settings.Global.DEVICE_NAME` (API 25+) or falls back to `"${Build.MANUFACTURER} ${Build.MODEL}"`.
+* **iOS Native:** Queries `UIDevice.current.name` (fallback `UIDevice.current.model`).
+* **Desktop & Web:** Uses `COMPUTERNAME` / `localHostname` on Windows/Mac/Linux, and parsed platform user agent on Web PWA.
+* **Header Propagation:** Senders pass `X-Sender-Device-Name` in every `/upload` call and UDP beacon so receivers display the genuine peer name.
 
 
 

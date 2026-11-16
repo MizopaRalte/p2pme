@@ -14,6 +14,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.util.Locale
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "net.p2pme/background_sync"
@@ -70,6 +71,23 @@ class MainActivity : FlutterActivity() {
                         result.success(map)
                     } catch (e: Exception) {
                         result.success(mapOf("free_bytes" to 0L, "total_bytes" to 0L))
+                    }
+                }
+                "getDeviceName" -> {
+                    try {
+                        var name: String? = null
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
+                            name = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)
+                        }
+                        if (name.isNullOrBlank()) {
+                            val manufacturer = Build.MANUFACTURER.replaceFirstChar {
+                                if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString()
+                            }
+                            name = "$manufacturer ${Build.MODEL}"
+                        }
+                        result.success(name)
+                    } catch (e: Exception) {
+                        result.success("${Build.MANUFACTURER} ${Build.MODEL}")
                     }
                 }
                 "requestIgnoreBatteryOptimization" -> {

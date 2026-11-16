@@ -1006,6 +1006,17 @@
     const uploadUrlBase = `http://${hub.host}:${hub.port}/upload`;
     const hubToken = hub.token || localStorage.getItem('p2pme_hub_token') || '';
 
+    const getSenderDeviceName = () => {
+      const ua = navigator.userAgent;
+      if (/iPhone/.test(ua)) return 'Web Client (iPhone)';
+      if (/iPad/.test(ua)) return 'Web Client (iPad)';
+      if (/Android/.test(ua)) return 'Web Client (Android)';
+      if (/Macintosh/.test(ua)) return 'Web Client (Mac)';
+      if (/Windows/.test(ua)) return 'Web Client (Windows)';
+      if (/Linux/.test(ua)) return 'Web Client (Linux)';
+      return 'Web Client';
+    };
+
     const formatBytesJs = (b) => {
       if (!b) return '0 B';
       if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
@@ -1034,7 +1045,8 @@
       // Smart retry: up to 2 attempts per file on transient network blip
       for (let attempt = 1; attempt <= 2 && !fileSuccess; attempt++) {
         try {
-          const uploadUrl = `${uploadUrlBase}?name=${encodeURIComponent(file.name)}&token=${encodeURIComponent(hubToken)}&fileIndex=${i + 1}&totalFiles=${totalFiles}&batchTotal=${totalBatchBytes}&batchSent=${batchBytesSent}`;
+          const senderDev = getSenderDeviceName();
+          const uploadUrl = `${uploadUrlBase}?name=${encodeURIComponent(file.name)}&token=${encodeURIComponent(hubToken)}&fileIndex=${i + 1}&totalFiles=${totalFiles}&batchTotal=${totalBatchBytes}&batchSent=${batchBytesSent}&senderDevice=${encodeURIComponent(senderDev)}`;
           const res = await fetch(uploadUrl, {
             method: 'POST',
             body: file,
@@ -1045,7 +1057,8 @@
               'X-File-Index': (i + 1).toString(),
               'X-Total-Files': totalFiles.toString(),
               'X-Batch-Total-Bytes': totalBatchBytes.toString(),
-              'X-Batch-Bytes-Sent': batchBytesSent.toString()
+              'X-Batch-Bytes-Sent': batchBytesSent.toString(),
+              'X-Sender-Device-Name': senderDev
             }
           });
 
