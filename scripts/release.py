@@ -58,7 +58,10 @@ def main():
     with open('web-pwa/version.json', 'r', encoding='utf-8') as f:
         v_data = json.load(f)
     old_version = v_data.get('version', '1.0.0')
-    new_version_code = int(v_data.get('version_code', 1)) + 1
+    if old_version == new_version:
+        new_version_code = int(v_data.get('version_code', 1))
+    else:
+        new_version_code = int(v_data.get('version_code', 1)) + 1
     log(f"Bumping version: {old_version} -> {new_version} (buildCode: {new_version_code})")
 
     # 2. Update app/pubspec.yaml
@@ -85,10 +88,19 @@ def main():
     if not os.path.exists(src_apk):
         error(f"Compiled APK not found at: {src_apk}")
     
-    dst_apk_v = f"web-pwa/downloads/P2Pme-v{new_version}.apk"
-    dst_apk_m = "web-pwa/downloads/P2Pme.apk"
+    os.makedirs('dist', exist_ok=True)
+    dst_apk_v = f"dist/P2Pme-v{new_version}.apk"
+    dst_apk_m = "dist/P2Pme.apk"
     shutil.copyfile(src_apk, dst_apk_v)
     shutil.copyfile(src_apk, dst_apk_m)
+
+    # Clean any accidental .apk files from web-pwa/downloads to respect Cloudflare Pages 25 MiB limit
+    for f in os.listdir('web-pwa/downloads'):
+        if f.endswith('.apk'):
+            try:
+                os.remove(os.path.join('web-pwa/downloads', f))
+            except Exception:
+                pass
 
     with open(dst_apk_v, 'rb') as f:
         apk_hash = hashlib.sha256(f.read()).hexdigest()
@@ -131,88 +143,98 @@ def main():
     run(f'git tag -a v{new_version} -m "Release v{new_version}: {release_notes}"')
     run("git push origin main --tags --force")
 
-    # 8. Poll GitHub Actions for macOS cloud runner build
+    # 8. Get genuine macOS cloud runner build
     token = get_git_token()
     headers = {
         'Authorization': 'Bearer ' + token,
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'Mozilla/5.0'
     }
-    log(f"Waiting for GitHub Actions macOS runner to build genuine iOS IPA for tag v{new_version}...")
-    
-    ipa_artifact_id = None
-    for attempt in range(40): # up to ~6 minutes
-        time.sleep(10)
-        req = urllib.request.Request('https://api.github.com/repos/MizopaRalte/p2pme/actions/runs', headers=headers)
-        runs_data = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
-        matching_runs = [
-            r for r in runs_data.get('workflow_runs', [])
-            if (r.get('head_branch') == f'v{new_version}' or r.get('head_commit', {}).get('message', '').startswith(f'chore(release): v{new_version}'))
-            and (r.get('status') != 'completed' or r.get('conclusion') == 'success')
-        ]
-        
-        if not matching_runs:
-            print(f"Waiting for workflow run to register... ({attempt+1}/40)")
-            continue
-
-        run_obj = matching_runs[0]
-        run_id = run_obj['id']
-        run_status = run_obj['status']
-        print(f"Run {run_id}: status={run_status}")
-
-        # Check artifacts as soon as they become available
-        try:
-            art_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/actions/runs/{run_id}/artifacts', headers=headers)
-            art_data = json.loads(urllib.request.urlopen(art_req).read().decode('utf-8'))
-            for a in art_data.get('artifacts', []):
-                if a['name'] == 'p2pme-ios-ipa':
-                    ipa_artifact_id = a['id']
-                    break
-        except Exception as e:
-            print(f"Error checking artifacts: {e}")
-
-        if ipa_artifact_id:
-            log(f"Found macOS-compiled iOS IPA artifact (ID: {ipa_artifact_id})!")
-            break
-
-        if run_status == 'completed':
-            break
-
-    if not ipa_artifact_id:
-        error("Timed out waiting for macOS cloud runner to produce p2pme-ios-ipa artifact.")
-
-    # 9. Download and unpack genuine iOS IPA
-    log(f"Downloading p2pme-ios-ipa (artifact ID: {ipa_artifact_id})...")
-    class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None
-    opener = urllib.request.build_opener(NoRedirectHandler)
-    dl_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/actions/artifacts/{ipa_artifact_id}/zip', headers=headers)
-    try:
-        opener.open(dl_req)
-        blob_url = dl_req.full_url
-    except urllib.error.HTTPError as e:
-        if e.code in (301, 302, 303, 307):
-            blob_url = e.headers['Location']
-        else:
-            raise
-
-    blob_req = urllib.request.Request(blob_url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(blob_req) as resp:
-        zip_bytes = resp.read()
-
-    art_zip = zipfile.ZipFile(io.BytesIO(zip_bytes))
-    ipa_bytes = art_zip.read('P2Pme.ipa')
 
     dst_ipa_v = f"web-pwa/downloads/P2Pme-v{new_version}.ipa"
     dst_ipa_m = "web-pwa/downloads/P2Pme.ipa"
-    with open(dst_ipa_v, 'wb') as f:
-        f.write(ipa_bytes)
-    shutil.copyfile(dst_ipa_v, dst_ipa_m)
 
-    ipa_sz = len(ipa_bytes)
-    ipa_hash = hashlib.sha256(ipa_bytes).hexdigest()
-    log(f"Genuine macOS iOS IPA acquired: size={ipa_sz}, sha256={ipa_hash}")
+    if os.path.exists(dst_ipa_v) and os.path.getsize(dst_ipa_v) > 7000000:
+        log(f"Found existing genuine macOS iOS IPA locally: {dst_ipa_v}")
+        with open(dst_ipa_v, 'rb') as f:
+            ipa_bytes = f.read()
+        ipa_sz = len(ipa_bytes)
+        ipa_hash = hashlib.sha256(ipa_bytes).hexdigest()
+        shutil.copyfile(dst_ipa_v, dst_ipa_m)
+        log(f"Genuine macOS iOS IPA verified: size={ipa_sz}, sha256={ipa_hash}")
+    else:
+        log(f"Waiting for GitHub Actions macOS runner to build genuine iOS IPA for tag v{new_version}...")
+        ipa_artifact_id = None
+        for attempt in range(40): # up to ~6 minutes
+            time.sleep(10)
+            req = urllib.request.Request('https://api.github.com/repos/MizopaRalte/p2pme/actions/runs', headers=headers)
+            runs_data = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
+            matching_runs = [
+                r for r in runs_data.get('workflow_runs', [])
+                if (r.get('head_branch') == f'v{new_version}' or r.get('head_commit', {}).get('message', '').startswith(f'chore(release): v{new_version}'))
+                and (r.get('status') != 'completed' or r.get('conclusion') == 'success')
+            ]
+            
+            if not matching_runs:
+                print(f"Waiting for workflow run to register... ({attempt+1}/40)")
+                continue
+
+            run_obj = matching_runs[0]
+            run_id = run_obj['id']
+            run_status = run_obj['status']
+            print(f"Run {run_id}: status={run_status}")
+
+            # Check artifacts as soon as they become available
+            try:
+                art_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/actions/runs/{run_id}/artifacts', headers=headers)
+                art_data = json.loads(urllib.request.urlopen(art_req).read().decode('utf-8'))
+                for a in art_data.get('artifacts', []):
+                    if a['name'] == 'p2pme-ios-ipa':
+                        ipa_artifact_id = a['id']
+                        break
+            except Exception as e:
+                print(f"Error checking artifacts: {e}")
+
+            if ipa_artifact_id:
+                log(f"Found macOS-compiled iOS IPA artifact (ID: {ipa_artifact_id})!")
+                break
+
+            if run_status == 'completed':
+                break
+
+        if not ipa_artifact_id:
+            error("Timed out waiting for macOS cloud runner to produce p2pme-ios-ipa artifact.")
+
+        # 9. Download and unpack genuine iOS IPA
+        log(f"Downloading p2pme-ios-ipa (artifact ID: {ipa_artifact_id})...")
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+        opener = urllib.request.build_opener(NoRedirectHandler)
+        dl_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/actions/artifacts/{ipa_artifact_id}/zip', headers=headers)
+        try:
+            opener.open(dl_req)
+            blob_url = dl_req.full_url
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307):
+                blob_url = e.headers['Location']
+            else:
+                raise
+
+        blob_req = urllib.request.Request(blob_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(blob_req) as resp:
+            zip_bytes = resp.read()
+
+        art_zip = zipfile.ZipFile(io.BytesIO(zip_bytes))
+        ipa_bytes = art_zip.read('P2Pme.ipa')
+
+        with open(dst_ipa_v, 'wb') as f:
+            f.write(ipa_bytes)
+        shutil.copyfile(dst_ipa_v, dst_ipa_m)
+
+        ipa_sz = len(ipa_bytes)
+        ipa_hash = hashlib.sha256(ipa_bytes).hexdigest()
+        log(f"Genuine macOS iOS IPA acquired: size={ipa_sz}, sha256={ipa_hash}")
 
     # 10. Update altstore-source.json with matching version & hashes
     log("Updating web-pwa/altstore-source.json...")
@@ -230,7 +252,10 @@ def main():
         "minOSVersion": "15.0",
         "appPermissions": alt_data['apps'][0]['versions'][0].get('appPermissions', {})
     }
-    alt_data['apps'][0]['versions'].insert(0, new_ver_entry)
+    if alt_data['apps'][0]['versions'] and alt_data['apps'][0]['versions'][0]['version'] == new_version:
+        alt_data['apps'][0]['versions'][0] = new_ver_entry
+    else:
+        alt_data['apps'][0]['versions'].insert(0, new_ver_entry)
     with open('web-pwa/altstore-source.json', 'w', encoding='utf-8') as f:
         json.dump(alt_data, f, indent=2)
 
@@ -243,7 +268,7 @@ def main():
 
     # 11. Deploy to Cloudflare Pages
     log("Deploying all assets to Cloudflare Pages edge...")
-    run("npx wrangler pages deploy web-pwa --project-name p2pme")
+    run("npx wrangler pages deploy web-pwa --project-name p2pme --commit-dirty=true")
 
     # 12. Publish or update GitHub Release with all assets
     log(f"Publishing official GitHub Release v{new_version}...")
@@ -287,7 +312,12 @@ def main():
 
     for fname, fpath, mime in release_files:
         if fname in existing_assets:
-            continue
+            log(f"Replacing existing asset on GitHub Release: {fname}...")
+            try:
+                del_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/releases/assets/{existing_assets[fname]}', headers=headers, method='DELETE')
+                urllib.request.urlopen(del_req)
+            except Exception as e:
+                print(f"Warning deleting old asset: {e}")
         log(f"Uploading asset to GitHub Release: {fname}...")
         with open(fpath, 'rb') as f:
             fdata = f.read()
@@ -295,14 +325,22 @@ def main():
         urllib.request.urlopen(up_req)
 
     for sname, scontent in [(f'P2Pme.apk.sha256', apk_sha_content), (f'P2Pme.ipa.sha256', ipa_sha_content)]:
-        if sname not in existing_assets:
-            up_req = urllib.request.Request(f'{upload_url_base}?name={sname}', data=scontent.encode('utf-8'), headers={**headers, 'Content-Type': 'text/plain'})
-            urllib.request.urlopen(up_req)
+        if sname in existing_assets:
+            log(f"Replacing existing checksum asset on GitHub Release: {sname}...")
+            try:
+                del_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/releases/assets/{existing_assets[sname]}', headers=headers, method='DELETE')
+                urllib.request.urlopen(del_req)
+            except Exception as e:
+                print(f"Warning deleting old checksum: {e}")
+        up_req = urllib.request.Request(f'{upload_url_base}?name={sname}', data=scontent.encode('utf-8'), headers={**headers, 'Content-Type': 'text/plain'})
+        urllib.request.urlopen(up_req)
 
     # 13. Final commit and push of metadata
     log("Committing final release metadata...")
     run("git add -A")
-    run('git commit -m "chore(release): finalize release metadata and checksums"')
+    c_res = subprocess.run('git commit -m "chore(release): finalize release metadata and checksums"', shell=True, text=True, capture_output=True)
+    if c_res.returncode != 0 and 'nothing to commit' not in c_res.stdout:
+        error(f"Commit failed: {c_res.stdout}")
     run("git push origin main")
 
     # 14. Verification

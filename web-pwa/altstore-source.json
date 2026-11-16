@@ -37,6 +37,24 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.0.7",
+          "buildVersion": "9",
+          "date": "2026-11-16",
+          "localizedDescription": "Instant Camera QR Server Pairing: 1-tap connection between sender (iPhone/Android) and 24/7 Server Hub with automatic 256-bit token pairing, persistent auto-reconnect, and QR viewfinder scanner.",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.0.7.ipa",
+          "size": 7548853,
+          "sha256": "9add78fc243a9c6239b43bcbcd1291b501b40631c9fc7d3b7b83e3a1e1c2c16c",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.0.6",
           "buildVersion": "7",
           "date": "2026-11-16",
