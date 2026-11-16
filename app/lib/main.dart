@@ -1936,18 +1936,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _selectedIndex == 0
-                      ? 'Transfer'
-                      : (_selectedIndex == 1 ? 'Backup' : 'Server'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 20,
-                    letterSpacing: -0.3,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFFE8EAED)
-                        : const Color(0xFF202124),
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      _selectedIndex == 0
+                          ? 'Transfer'
+                          : (_selectedIndex == 1 ? 'Backup' : 'Server'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 20,
+                        letterSpacing: -0.3,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? const Color(0xFFE8EAED)
+                            : const Color(0xFF202124),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () => _showDiagnostics(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? const Color(0xFF303134)
+                              : GooglePhotosColors.blue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? const Color(0xFF5F6368)
+                                : GooglePhotosColors.blue.withValues(alpha: 0.25),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Text(
+                          'v$_currentVersionName',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.2,
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? const Color(0xFF8AB4F8)
+                                : GooglePhotosColors.blue,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 Text(
                   _selectedIndex == 0
