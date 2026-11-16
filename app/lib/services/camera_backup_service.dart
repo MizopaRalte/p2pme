@@ -219,6 +219,19 @@ class CameraBackupService {
     return unsynced;
   }
 
+  bool _isSyncPaused = false;
+  bool get isSyncPaused => _isSyncPaused;
+
+  void pauseSync() {
+    _isSyncPaused = true;
+    _state = CameraBackupState.idle;
+    _stateController.add(_state);
+  }
+
+  void resumeSync() {
+    _isSyncPaused = false;
+  }
+
   /// Automatically upload all unsynced camera photos to connected peer/server
   Future<int> syncPendingToPeer({
     required String peerIp,
@@ -226,6 +239,7 @@ class CameraBackupService {
     required String token,
     Function(int current, int total, String filename)? onProgress,
   }) async {
+    _isSyncPaused = false;
     final pending = await scanCameraRoll();
     if (pending.isEmpty) {
       _state = CameraBackupState.upToDate;
@@ -238,6 +252,10 @@ class CameraBackupService {
     int transferredCount = 0;
 
     for (int i = 0; i < pending.length; i++) {
+      if (_isSyncPaused) {
+        debugPrint('[CameraBackup] Backup paused by user.');
+        break;
+      }
       final item = pending[i];
       _currentSyncIndex = i + 1;
       _currentSyncingFilename = item.filename;

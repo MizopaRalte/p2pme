@@ -4665,18 +4665,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Expanded(
                   child: FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: GooglePhotosColors.blue,
+                      backgroundColor: isSyncing ? Colors.orange.shade800 : GooglePhotosColors.blue,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
-                    onPressed: isSyncing ? null : _syncCameraRollToConnectedPeer,
+                    onPressed: isSyncing
+                        ? () {
+                            service.pauseSync();
+                            if (mounted) setState(() {});
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Backup paused. Tap "Resume Backup" to continue.'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        : _syncCameraRollToConnectedPeer,
                     icon: isSyncing
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        ? const Icon(Icons.pause_circle_filled_rounded, size: 18)
                         : const Icon(Icons.sync_rounded, size: 16),
                     label: Text(
                       isSyncing
-                          ? 'Backing up...'
+                          ? 'Pause Backup'
                           : (service.pendingAssetsCount > 0
                               ? 'Backup New (${service.pendingAssetsCount})'
                               : 'Sync Camera Roll'),

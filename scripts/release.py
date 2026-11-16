@@ -88,19 +88,10 @@ def main():
     if not os.path.exists(src_apk):
         error(f"Compiled APK not found at: {src_apk}")
     
-    os.makedirs('dist', exist_ok=True)
-    dst_apk_v = f"dist/P2Pme-v{new_version}.apk"
-    dst_apk_m = "dist/P2Pme.apk"
+    dst_apk_v = f"web-pwa/downloads/P2Pme-v{new_version}.apk"
+    dst_apk_m = "web-pwa/downloads/P2Pme.apk"
     shutil.copyfile(src_apk, dst_apk_v)
     shutil.copyfile(src_apk, dst_apk_m)
-
-    # Clean any accidental .apk files from web-pwa/downloads to respect Cloudflare Pages 25 MiB limit
-    for f in os.listdir('web-pwa/downloads'):
-        if f.endswith('.apk'):
-            try:
-                os.remove(os.path.join('web-pwa/downloads', f))
-            except Exception:
-                pass
 
     with open(dst_apk_v, 'rb') as f:
         apk_hash = hashlib.sha256(f.read()).hexdigest()

@@ -1,3 +1,0 @@
-# Cloudflare Pages 302 Redirects for large releases (>25 MiB)
-/downloads/P2Pme.apk https://github.com/MizopaRalte/p2pme/releases/latest/download/P2Pme.apk 302
-/downloads/P2Pme-v:version.apk https://github.com/MizopaRalte/p2pme/releases/download/v:version/P2Pme-v:version.apk 302
