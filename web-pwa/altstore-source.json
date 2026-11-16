@@ -37,6 +37,24 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.2.1",
+          "buildVersion": "15",
+          "date": "2026-11-16",
+          "localizedDescription": "Release v1.2.1: Dynamic hardware device names, symmetrical sender/receiver telemetry, sender-exclusive pause control, Wi-Fi only sync guard, 5-minute storage wait timeout, and iOS screen recording exclusion.",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.2.1.ipa",
+          "size": 7618882,
+          "sha256": "50acca1040d8e7cf09873cddca510efaccaac2a55df9ee5c0c37c7c3961daf88",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.2.0",
           "buildVersion": "14",
           "date": "2026-11-16",
