@@ -93,6 +93,33 @@
 
 ---
 
+
+### L. Non-Destructive File Collision Prevention & Data Immutability Guarantee
+* **Risk:** Adversarial or accidental file collision where an incoming asset overwrites an existing file of the same name (e.g. `IMG_0001.JPG`), causing irrecoverable user data loss.
+* **Mitigation:**
+  * **Zero-Overwrite Invariant:** P2Pme enforces non-destructive file collision handling via `_resolveUniqueFilePath`. When a destination file exists, the system automatically preserves the original and renames the incoming copy with an ISO timestamp suffix (`<base>_<YYYYMMDD>_<HHMMSS>.<ext>`).
+  * **Path Traversal Sanitization:** Before collision resolution, all filenames are stripped of directory traversal components (`../`, `..\`) and restricted to alphanumeric characters, hyphens, underscores, and periods.
+
+### M. Android 11+ Scoped Storage & Explicit Permission Boundaries
+* **Risk:** Arbitrary filesystem writes outside sandbox boundaries or unauthorized access to sensitive application data.
+* **Mitigation:**
+  * **Strict Sandboxing by Default:** Standard downloads default to public `Download/P2Pme` without requiring broad permissions.
+  * **Scoped Storage Permission Gate:** If a user chooses a custom directory on external storage on Android 11+ (API 30+), P2Pme checks `Environment.isExternalStorageManager()`. If missing, it provides a transparent educational dialog and 1-tap redirect to `Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION`, adhering to Google Play policies.
+
+### N. Multi-Stream Ingestion Session Isolation & Memory Protection
+* **Risk:** Cross-session state pollution or buffer overflow when multiple peers upload concurrently to a 24/7 Server Hub.
+* **Mitigation:**
+  * **State Encapsulation:** Each inbound connection is tracked in an isolated `ActiveReceiverSession` struct keyed by session ID.
+  * **Bounded Chunk Buffering:** Files are ingested in streaming 256 KB slices directly into disk sinks, guaranteeing low RAM utilization regardless of file size.
+
+### O. Low-Battery & Power Throttling Safeguards
+* **Risk:** Battery exhaustion and sudden shutdown during heavy SQLite indexing or flash memory write operations, risking filesystem corruption.
+* **Mitigation:**
+  * **Automatic Battery Gate:** Automatic background backup is inhibited when device battery drops below 15% and is discharging.
+  * **Transparent User Warning:** Manual bulk backups display cautionary notices if battery is low, recommending connection to a power source.
+
+---
+
 ## 3. Reporting a Vulnerability
 
 If you discover a security issue or vulnerability in P2Pme, please report it privately via GitHub Security Advisories or by emailing the project maintainers.

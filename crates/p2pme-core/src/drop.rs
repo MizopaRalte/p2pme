@@ -353,7 +353,7 @@ impl DropManager {
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| format!("file_{}", file_idx));
 
-            let out_path = dest.join(&safe_name);
+            let out_path = resolve_unique_file_path(dest, &safe_name);
             let mut out_file = std::fs::File::create(&out_path)?;
 
             let mut file_hasher = blake3::Hasher::new();
@@ -406,3 +406,37 @@ pub struct DropReceiveStats {
     pub bytes_transferred: u64,
 }
 
+
+pub fn resolve_unique_file_path(dest: &Path, original_name: &str) -> PathBuf {
+    let candidate = dest.join(original_name);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let p = Path::new(original_name);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or(original_name);
+    let ext = p.extension().and_then(|s| s.to_str());
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let candidate_name = match ext {
+        Some(e) => format!("{}_{}.{}", stem, now_secs, e),
+        None => format!("{}_{}", stem, now_secs),
+    };
+    let mut candidate = dest.join(&candidate_name);
+
+    let mut counter = 1;
+    while candidate.exists() {
+        let candidate_name = match ext {
+            Some(e) => format!("{}_{}_{}.{}", stem, now_secs, counter, e),
+            None => format!("{}_{}_{}", stem, now_secs, counter),
+        };
+        candidate = dest.join(&candidate_name);
+        counter += 1;
+    }
+
+    candidate
+}

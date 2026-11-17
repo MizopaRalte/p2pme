@@ -56,6 +56,7 @@ class CameraBackupService {
   Stream<CameraBackupState> get stateStream => _stateController.stream;
 
   CameraBackupState get state => _state;
+  bool get isSyncing => _state == CameraBackupState.syncing;
   bool get isServerStorageFull => _isServerStorageFull;
   int get totalDeviceAssets => _totalDeviceAssets;
   int get pendingAssetsCount => _pendingAssetsCount;
@@ -67,6 +68,26 @@ class CameraBackupService {
   /// Receiver free storage in bytes – populated before first file of each batch
   int? get receiverFreeStorageBytes => _receiverFreeStorageBytes;
   int? get receiverTotalStorageBytes => _receiverTotalStorageBytes;
+
+  /// Public pre-flight probe: query target receiver's /api/info to update storage telemetry immediately
+  Future<void> probeReceiverStorage(String host, int port) async {
+    try {
+      final infoClient = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+      final infoReq = await infoClient.getUrl(Uri.parse('http://$host:$port/api/info'));
+      final infoResp = await infoReq.close();
+      if (infoResp.statusCode == HttpStatus.ok) {
+        final body = await utf8.decoder.bind(infoResp).join();
+        final infoJson = jsonDecode(body) as Map<String, dynamic>;
+        final storageMap = infoJson['storage'] as Map<String, dynamic>?;
+        _receiverFreeStorageBytes = (storageMap?['free_bytes'] as num?)?.toInt();
+        _receiverTotalStorageBytes = (storageMap?['total_bytes'] as num?)?.toInt();
+        _stateController.add(_state);
+        debugPrint('[CameraBackup] Probed receiver storage: $_receiverFreeStorageBytes bytes free');
+      }
+    } catch (e) {
+      debugPrint('[CameraBackup] probeReceiverStorage failed: $e');
+    }
+  }
 
   VoidCallback? onNewAssetsDetected;
 
@@ -373,41 +394,48 @@ class CameraBackupService {
 
     String activeHost = peerIp;
     int activePort = peerPort;
+    bool lanReachable = false;
 
-    // Pre-flight: probe receiver's /api/info to get storage telemetry before first file
+    // Fast probe to verify if LAN peerIp is directly reachable and discover storage
     try {
-      final infoClient = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+      final infoClient = HttpClient()..connectionTimeout = const Duration(seconds: 2);
       final infoReq = await infoClient.getUrl(Uri.parse('http://$peerIp:$peerPort/api/info'));
       final infoResp = await infoReq.close();
       if (infoResp.statusCode == HttpStatus.ok) {
+        lanReachable = true;
         final body = await utf8.decoder.bind(infoResp).join();
         final infoJson = jsonDecode(body) as Map<String, dynamic>;
         final storageMap = infoJson['storage'] as Map<String, dynamic>?;
         _receiverFreeStorageBytes = (storageMap?['free_bytes'] as num?)?.toInt();
         _receiverTotalStorageBytes = (storageMap?['total_bytes'] as num?)?.toInt();
-        debugPrint('[CameraBackup] Pre-flight: receiver free=$_receiverFreeStorageBytes bytes');
+        _stateController.add(_state);
+        debugPrint('[CameraBackup] Pre-flight LAN storage: $_receiverFreeStorageBytes bytes free');
       }
-    } catch (e) {
-      debugPrint('[CameraBackup] Pre-flight /api/info probe failed (non-fatal): $e');
+    } catch (_) {
+      lanReachable = false;
     }
 
-    // Fast probe to verify if LAN peerIp is directly reachable. If not and wanHost is provided, switch to WAN
-    if (wanHost != null && wanHost.isNotEmpty && wanHost != peerIp) {
+    // If LAN peer is unreachable and wanHost is provided, switch to WAN endpoint
+    if (!lanReachable && wanHost != null && wanHost.isNotEmpty && wanHost != peerIp) {
       if (wifiOnly && !isUsbConnected) {
         debugPrint('[CameraBackup] LAN peer unreachable. Wi-Fi Only sync prevents falling back to WAN.');
       } else {
+        activeHost = wanHost;
+        activePort = wanPort ?? peerPort;
         try {
-          final probeClient = HttpClient()..connectionTimeout = const Duration(seconds: 2);
-          final req = await probeClient.getUrl(Uri.parse('http://$peerIp:$peerPort/api/info'));
+          final wanClient = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+          final req = await wanClient.getUrl(Uri.parse('http://$activeHost:$activePort/api/info'));
           final resp = await req.close();
-          if (resp.statusCode != HttpStatus.ok) {
-            activeHost = wanHost;
-            activePort = wanPort ?? peerPort;
+          if (resp.statusCode == HttpStatus.ok) {
+            final body = await utf8.decoder.bind(resp).join();
+            final infoJson = jsonDecode(body) as Map<String, dynamic>;
+            final storageMap = infoJson['storage'] as Map<String, dynamic>?;
+            _receiverFreeStorageBytes = (storageMap?['free_bytes'] as num?)?.toInt();
+            _receiverTotalStorageBytes = (storageMap?['total_bytes'] as num?)?.toInt();
+            _stateController.add(_state);
+            debugPrint('[CameraBackup] Pre-flight WAN storage: $_receiverFreeStorageBytes bytes free');
           }
-        } catch (_) {
-          activeHost = wanHost;
-          activePort = wanPort ?? peerPort;
-        }
+        } catch (_) {}
       }
     }
 
@@ -502,6 +530,15 @@ class CameraBackupService {
               transferredCount++;
               _lastSyncTime = DateTime.now();
               await _saveStorage();
+              break;
+            } else if (resp.statusCode == HttpStatus.serviceUnavailable) {
+              debugPrint('[CameraBackup] Receiver hub is paused by host (HTTP 503). Halting batch.');
+              _lastError = 'Receiver hub is temporarily paused by host.';
+              _isSyncPaused = true;
+              _state = CameraBackupState.idle;
+              _stateController.add(_state);
+              _batchBytesSent = (_batchBytesSent - _currentFileBytesSent).clamp(0, _batchTotalBytes);
+              _currentFileBytesSent = 0;
               break;
             } else if (resp.statusCode == 507) {
               debugPrint('[CameraBackup] Receiver storage full (HTTP 507). Pausing and awaiting cleanup...');
@@ -634,6 +671,38 @@ class CameraBackupService {
   }
 
   static const MethodChannel _bgChannel = MethodChannel('net.p2pme/background_sync');
+
+  Future<bool> isAllFilesAccessGranted() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final res = await _bgChannel.invokeMethod<bool>('isAllFilesAccessGranted');
+      return res ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> requestAllFilesAccess() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _bgChannel.invokeMethod('requestAllFilesAccess');
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>> getBatteryStatus() async {
+    if (Platform.isAndroid) {
+      try {
+        final res = await _bgChannel.invokeMethod('getBatteryStatus');
+        if (res is Map) {
+          return {
+            'level': (res['level'] as num?)?.toInt() ?? 100,
+            'isCharging': res['isCharging'] as bool? ?? true,
+          };
+        }
+      } catch (_) {}
+    }
+    return {'level': 100, 'isCharging': true};
+  }
 
   Future<Map<String, int>> getStorageSpace() async {
     try {

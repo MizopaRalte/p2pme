@@ -288,5 +288,54 @@ Sender (Client)                                          Receiver (24/7 Hub)
 * **Desktop & Web:** Uses `COMPUTERNAME` / `localHostname` on Windows/Mac/Linux, and parsed platform user agent on Web PWA.
 * **Header Propagation:** Senders pass `X-Sender-Device-Name` in every `/upload` call and UDP beacon so receivers display the genuine peer name.
 
+---
 
+## 12. Non-Destructive File Collision Resolution & Timestamp Suffix Protocol
 
+* **Collision Trigger Condition:** When an HTTP `POST /upload?name=<filename>` or QUIC `DropRequestChunk` requests a file creation in destination folder $D$ where $D/<filename>$ already exists on disk.
+* **Derived Path Formula:**
+  $$\text{TargetName} = \text{stem}(filename) + \text{"_"} + \text{YYYYMMDD} + \text{"_"} + \text{HHMMSS} + \text{ext}(filename)$$
+* **Monotonic Collision Counter:** If the derived timestamped filename also exists, an incremental counter suffix `_1`, `_2` is appended before the extension until a non-existent candidate path is found.
+* **Audit Trail:** The receiver logs `[CollisionResolver] Filename collision detected for <orig> -> auto-renamed to <new>` and returns `200 OK` upon completion. The sender's ephemeral session completes normally.
+
+---
+
+## 13. Destination Folder Negotiation & External Provisioning Protocol
+
+* **Configuration Schema (`.p2pme_config.json`):**
+  ```json
+  {
+    "version": "1.2.2",
+    "customDeviceName": "Living Room Hub",
+    "receiveDestination": "/storage/emulated/0/Download/P2Pme",
+    "isDefaultDestinationSet": true,
+    "wifiOnlySync": true,
+    "backgroundSyncEnabled": true,
+    "rememberRole": true,
+    "savedRole": "receiver",
+    "folders": []
+  }
+  ```
+* **Discovery Protocol Precedence:** On Android, the engine inspects internal documents storage first; if missing or if an external configuration is detected at `/storage/emulated/0/Download/P2Pme/.p2pme_config.json`, the external provisioning profile is loaded, and the UI immediately triggers a reactive state transition.
+
+---
+
+## 14. Multi-Stream Ingestion Session Protocol (ActiveReceiverSession)
+
+* **HTTP Ingestion Headers:**
+  * `X-Session-Token`: 128-bit session token or 256-bit server hub master secret.
+  * `X-Sender-Name`: Dynamic hardware device name of the transmitter.
+  * `X-File-Index`: Monotonically increasing zero-indexed file counter.
+  * `X-Total-Files`: Total number of assets in the current transfer batch.
+* **Session Lifecycle:** Sessions are instantiated upon first chunk arrival, updated every 250ms with smoothed byte deltas, and automatically pruned upon socket close or `DropComplete` frame.
+
+---
+
+## 15. Battery Level & Power State Protocol
+
+* **Native Query Signature:**
+  ```dart
+  Future<Map<String, dynamic>> getBatteryStatus();
+  // Returns: { "capacity": int (0-100), "is_charging": bool }
+  ```
+* **Enforcement Rule:** If `capacity < 15 && !is_charging`, `_triggerAutoCameraBackup()` returns immediately without scanning DCIM/PhotoKit libraries, mitigating power collapse.

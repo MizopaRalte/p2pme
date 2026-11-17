@@ -2,6 +2,8 @@ package net.p2pme.p2pme_app
 
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -103,6 +105,49 @@ class MainActivity : FlutterActivity() {
                         }
                     } else {
                         result.success(true)
+                    }
+                }
+                "isAllFilesAccessGranted" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        result.success(Environment.isExternalStorageManager())
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "requestAllFilesAccess" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        try {
+                            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                                data = Uri.parse("package:$packageName")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            try {
+                                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(intent)
+                                result.success(true)
+                            } catch (e2: Exception) {
+                                result.error("PERMISSION_ERROR", e2.message, null)
+                            }
+                        }
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "getBatteryStatus" -> {
+                    try {
+                        val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+                        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                        val statusIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                        val status = statusIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+                        result.success(mapOf("level" to level, "isCharging" to isCharging))
+                    } catch (e: Exception) {
+                        result.success(mapOf("level" to 100, "isCharging" to true))
                     }
                 }
                 "getAppVersion" -> {

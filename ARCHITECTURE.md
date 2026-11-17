@@ -261,7 +261,7 @@ sequenceDiagram
 
 ---
 
-## 11. Dynamic Device Naming & Symmetrical Role Isolation
+## 12. Dynamic Device Naming & Symmetrical Role Isolation
 
 ```mermaid
 flowchart TD
@@ -285,8 +285,78 @@ flowchart TD
 2. **Symmetrical User Clarity:** Senders always see upload speeds and sent metrics directed at the specific receiver; receivers always see download speeds and received metrics originating from the specific sender.
 3. **Sender-Exclusive Pause Control:** In Server Mode, the receiver functions as an automated ingestion daemon. Senders retain exclusive control over pausing and resuming backups to eliminate two-way state conflicts.
 
+---
 
+## 13. Non-Destructive File Collision Resolution Pipeline
 
+```mermaid
+flowchart TD
+    A["Incoming File Stream
+(safeName: IMG_0001.jpg)"] --> B{"Target File Exists in
+Destination Directory?"}
+    B -- "No" --> C["Target Path: IMG_0001.jpg"]
+    B -- "Yes (Collision Detected)" --> D["Generate ISO Timestamp Suffix:
+YYYYMMDD_HHMMSS"]
+    D --> E["Candidate: IMG_0001_YYYYMMDD_HHMMSS.jpg"]
+    E --> F{"Candidate Exists?"}
+    F -- "No" --> G["Target Path: IMG_0001_YYYYMMDD_HHMMSS.jpg"]
+    F -- "Yes" --> H["Increment Numeric Counter
+(e.g., _1, _2)"]
+    H --> F
+    C --> I["Log [CollisionResolver] Telemetry"]
+    G --> I
+    I --> J["Open File Stream & Stream 256 KB Chunks"]
+    J --> K["Verify BLAKE3 / SHA-256 Checksum"]
+```
 
+1. **Historical Immutability:** P2Pme treats landed files as immutable historical records. Incoming transfers with matching names are never allowed to silently truncate or overwrite existing files.
+2. **Deterministic Timestamping:** Collisions are resolved using `_resolveUniqueFilePath`, which splits the filename into base and extension and injects `_<YYYYMMDD>_<HHMMSS>`, followed by a monotonic counter in high-concurrency conditions.
+3. **Rust & Flutter Symmetry:** The collision resolution pipeline is implemented symmetrically across both native Dart (`_resolveUniqueFilePath`) and the core Rust replication engine (`crates/p2pme-core/src/drop.rs`).
 
+---
 
+## 14. Dedicated Destination Folder Selection & Headless Configuration Architecture
+
+1. **Explicit Pre-Flight Ingestion Path Selection:** On the Receiver screen, users can inspect their active save destination and trigger a native directory picker to select any local path (internal storage, SD card, external drive).
+2. **Persistent Default State:** Users can toggle "Set as default destination", which synchronizes the preference into `.p2pme_config.json`.
+3. **Two-Tier Configuration Fallback for Headless Hubs:**
+   * **Tier 1 (OS Documents Sandbox):** Primary storage path (`/data/data/net.p2pme.p2pme_app/files/` on Android, `$HOME/Documents/` on iOS).
+   * **Tier 2 (External Shared Storage):** `/storage/emulated/0/Download/P2Pme/.p2pme_config.json` allows system administrators and automated scripts to provision server roles, destination paths, and device names headlessly without requiring root access or UI interaction.
+
+---
+
+## 15. Multi-Stream Ingestion Architecture (ActiveReceiverSession)
+
+1. **State Isolation:** In legacy implementations, global transfer variables (`_receivingFileName`, `_receivingSpeedMBps`) created race conditions when multiple devices beamed files simultaneously.
+2. **Session Thread Encapsulation:** In P2Pme v1.2.2+, each inbound transfer stream is tracked within an isolated `ActiveReceiverSession` struct containing:
+   * `sessionId`: Unique 128-bit session identifier.
+   * `senderName`: Dynamic hardware name of the transmitting peer.
+   * `senderIp`: Network socket address.
+   * `fileName`: Name of the file currently in-flight.
+   * `bytesReceived` & `totalBytes`: Byte counters for the current asset.
+   * `speedMBps`: Low-pass smoothed wire-speed transfer metric.
+3. **Aggregated Dashboard Telemetry:** The Receiver Hub calculates total aggregate wire throughput across all active sessions (`_calculateAggregatedReceivingSpeedMBps`), providing an accurate real-time dashboard of server utilization.
+
+---
+
+## 16. Low-Battery Auto-Backup Protection Guard
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Engine as CameraBackupService
+    participant Battery as OS BatteryManager (Platform Channel)
+    participant UI as Backup Dashboard
+
+    Engine->>Battery: getBatteryStatus()
+    Battery-->>Engine: { capacity: 12%, is_charging: false }
+    alt Battery < 15% AND Discharging
+        Engine->>UI: Show Low-Battery Protection Alert
+        Note over Engine: Abort Auto-Backup & Schedule Re-check on Power Plugged
+    else Battery >= 15% OR Plugged In
+        Engine->>Engine: Proceed with Camera Roll Scan & Direct Sync
+    end
+```
+
+1. **Discharge Threshold:** Auto-sync is blocked if battery capacity is strictly below 15% and `is_charging` is false.
+2. **Manual Override Warning:** If a user initiates a heavy manual camera roll backup while under 15% battery, the UI presents a cautionary confirmation dialog advising them to connect a charger before proceeding.

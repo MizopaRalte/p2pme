@@ -30,6 +30,8 @@
 * **Smart Adapter Filtering & Subnet Sweep:** Filters out virtual VPN/tunnel adapters (WireGuard, AdGuard, OpenVPN) to probe real physical network interfaces, with manual "Add by IP" fallback.
 * **6-Digit PIN & WebDrop Over Internet:** Send to any device worldwide with a 6-digit PIN code or zero-install browser link (`https://p2pme.pages.dev`).
 * **Self-Destructing Ephemeral Security:** 3 incorrect PIN attempts wipe the session instantly; sessions automatically expire in 10 minutes.
+* **Non-Destructive File Collision Prevention:** Incoming duplicate files never overwrite existing files. Duplicate names are automatically assigned an ISO timestamp suffix (`<base>_<YYYYMMDD>_<HHMMSS>.<ext>`) to guarantee zero silent overwrites and 100% historical data preservation.
+* **Dedicated Receiver Destination Selection:** Choose where incoming files land before receiving, with a 1-tap option to save the chosen path as your persistent default destination.
 
 ### 🔄 2. Backup Tab: Continuous Background Sync
 * **Instant Camera QR Server Pairing:** 1-tap connection to your 24/7 Server Hub. Tap "Scan Server QR Code" on your sending phone (e.g. iPhone) and point at the Server Hub screen (e.g. Android phone or PC). Automatically parses IP, port, remote WAN address, and 256-bit CSPRNG security tokens for instantaneous zero-typing pairing.
@@ -41,6 +43,7 @@
 * **Persistent Server State & Unified Configuration:** Remembers paired servers, custom download paths, sync folders, and preferences across app restarts, updates, and network switches. Stored permanently in OS-protected documents storage (`.p2pme_config.json` and `p2pme_synced_camera_assets.json`) with zero reset on updates.
 * **Native Screenshot & Screen Recording Exclusion:** iOS PhotoKit and Android DCIM queries automatically exclude screenshots and screen recordings (`PHAssetMediaSubtype.photoScreenshot` and `videoScreenRecording`), ensuring only genuine photos and videos enter the camera roll backup queue.
 * **Wi-Fi Only Sync Enforcement:** When enabled, automatically blocks cellular/WAN transfers to protect user mobile data allowances, only permitting sync over local Wi-Fi or high-speed USB cable.
+* **Low-Battery Auto-Backup Protection:** Native battery monitoring automatically pauses camera roll synchronization when the device battery drops below 15% and is discharging, preventing battery exhaustion and abrupt shutdown.
 * **Real-Time Receiver Storage Telemetry:** The sender queries receiver disk space over native APIs (`StatFs` / iOS `resourceValues`) and exposes it in the Connected Server card (`Pixel 7 Pro • 42.2 GB Free`) with proactive warnings if a photo batch exceeds destination storage.
 * **Intelligent Out-of-Space Protocol (HTTP 507 & Bounded Auto-Resume):** When the receiver disk fills up, the server responds with `HTTP 507 Insufficient Storage`. The receiver alerts the user to tap "Free up space" in Google Photos, while the sender automatically pauses and polls the receiver every 5 seconds (up to 5 minutes timeout), auto-resuming seamlessly as soon as capacity is freed!
 * **Role & Peer Isolation:** Receivers in Server Mode no longer pick up nearby client devices as their own backup server on Tab 2. Active incoming transfers are isolated to Tab 3 (Server Hub).
@@ -64,6 +67,9 @@
 * **Direct Server Ticket & Dynamic QR Code:** Connect new client devices to your hub using a master server pairing code or direct LAN socket (`http://<ip>:45455`).
 * **1-Tap Zero-Conflict Key Regeneration:** Rotate your Server Hub Secret Key (256-bit CSPRNG) on demand with 1 tap. Immediately revokes older QR codes and browser links with zero server collisions.
 * **Battery Optimization Management:** Visual indicator and 1-tap shortcut to disable OS battery throttling on Android for uninterrupted background replication.
+* **Multi-Stream Concurrent Ingestion:** Concurrent file beams from multiple family devices are ingested into thread-isolated `ActiveReceiverSession` instances, displaying aggregated real-time throughput with zero global state race conditions.
+* **Android 11+ Scoped Storage Management:** Gracefully checks `MANAGE_EXTERNAL_STORAGE` when custom directories are chosen on Android 11+ (API 30+), with a 1-tap redirect to Android Settings for full write access.
+* **Headless Configuration Provisioning:** Automatically inspects shared external storage (`/sdcard/Download/P2Pme/.p2pme_config.json`) for automated provisioning on headless media centers and Android TV hubs.
 
 ---
 

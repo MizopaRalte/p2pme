@@ -357,6 +357,41 @@ class NearbyPeer {
 }
 
 // ==========================================
+// ACTIVE RECEIVER SESSION (MULTI-DEVICE INGESTION)
+// ==========================================
+class ActiveReceiverSession {
+  final String sessionId;
+  final String senderName;
+  final String? senderIp;
+  String fileName;
+  int fileIndex;
+  int totalFiles;
+  int batchTotalBytes;
+  int batchBytesReceived;
+  int fileTotalBytes;
+  int fileBytesReceived;
+  double speedMBps;
+  double progressRatio;
+  DateTime lastUpdated;
+
+  ActiveReceiverSession({
+    required this.sessionId,
+    required this.senderName,
+    this.senderIp,
+    required this.fileName,
+    required this.fileIndex,
+    required this.totalFiles,
+    required this.batchTotalBytes,
+    required this.batchBytesReceived,
+    required this.fileTotalBytes,
+    required this.fileBytesReceived,
+    required this.speedMBps,
+    required this.progressRatio,
+    required this.lastUpdated,
+  });
+}
+
+// ==========================================
 // ROLE SELECTION
 // ==========================================
 enum AppRole { none, sender, receiver, server }
@@ -369,7 +404,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  int _selectedIndex = 0;
   String? _nodeId;
   int _listeningPort = 0;
   bool _isEngineReady = false;
@@ -403,7 +437,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isServerPaused = false;
 
   // Quick Drop State
-  int _quickDropTab = 0; // 0 = Send, 1 = Receive
   final List<String> _selectedFilePaths = [];
   String? _activeDropPin;
   String? _activeDropTicket;
@@ -419,6 +452,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Real-time File Transfer Speed Telemetry
   bool _isReceivingActive = false;
+  bool _isDirectSendingActive = false;
   String? _receivingFileName;
   double _receivingSpeedMBps = 0.0;
   double _receivingProgressRatio = 0.0;
@@ -437,6 +471,80 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       : (Platform.isIOS && Platform.environment['HOME'] != null
           ? '${Platform.environment['HOME']}/Documents/P2Pme'
           : './received_drop');
+  bool _isDefaultDestinationSet = false;
+  final Map<String, ActiveReceiverSession> _activeReceiverSessions = {};
+
+  String _resolveUniqueFilePath(String destDirPath, String originalName) {
+    File candidate = File('$destDirPath${Platform.pathSeparator}$originalName');
+    if (!candidate.existsSync()) {
+      return candidate.path;
+    }
+
+    final dotIdx = originalName.lastIndexOf('.');
+    final base = dotIdx != -1 ? originalName.substring(0, dotIdx) : originalName;
+    final ext = dotIdx != -1 ? originalName.substring(dotIdx) : '';
+
+    final now = DateTime.now();
+    final year = now.year.toString().padLeft(4, '0');
+    final month = now.month.toString().padLeft(2, '0');
+    final day = now.day.toString().padLeft(2, '0');
+    final hour = now.hour.toString().padLeft(2, '0');
+    final minute = now.minute.toString().padLeft(2, '0');
+    final second = now.second.toString().padLeft(2, '0');
+    final ts = '$year$month${day}_$hour$minute$second';
+
+    String candidateName = '${base}_$ts$ext';
+    candidate = File('$destDirPath${Platform.pathSeparator}$candidateName');
+
+    int counter = 1;
+    while (candidate.existsSync()) {
+      candidateName = '${base}_${ts}_$counter$ext';
+      candidate = File('$destDirPath${Platform.pathSeparator}$candidateName');
+      counter++;
+    }
+
+    return candidate.path;
+  }
+
+  Future<void> _checkAndPromptAllFilesAccess() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final granted = await CameraBackupService.instance.isAllFilesAccessGranted();
+      if (!granted && mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(
+              children: [
+                Icon(Icons.folder_shared_rounded, color: GooglePhotosColors.blue, size: 24),
+                SizedBox(width: 8),
+                Text('Storage Access Required', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: const Text(
+              'To save backups and incoming drops into custom folders on modern Android, P2Pme needs "All files access".\n\nPlease enable it in Settings on the next screen.',
+              style: TextStyle(fontSize: 13, height: 1.4),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: GooglePhotosColors.blue),
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  CameraBackupService.instance.requestAllFilesAccess();
+                },
+                child: const Text('Grant in Settings'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (_) {}
+  }
 
   String _getAppBaseDirectory() {
     if (Platform.isAndroid) {
@@ -485,7 +593,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _loadAppConfig() async {
     try {
       final baseDir = _getAppBaseDirectory();
-      final configFile = File('$baseDir${Platform.pathSeparator}.p2pme_config.json');
+      File configFile = File('$baseDir${Platform.pathSeparator}.p2pme_config.json');
+      if (Platform.isAndroid) {
+        final extFile = File('/storage/emulated/0/Download/P2Pme/.p2pme_config.json');
+        if (await extFile.exists()) {
+          configFile = extFile;
+        }
+      }
       if (await configFile.exists()) {
         final content = await configFile.readAsString();
         if (content.trim().isNotEmpty) {
@@ -502,6 +616,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (dest.isNotEmpty) {
               _receiveDestination = dest;
             }
+          }
+          if (json.containsKey('isDefaultDestinationSet') && json['isDefaultDestinationSet'] is bool) {
+            _isDefaultDestinationSet = json['isDefaultDestinationSet'] as bool;
           }
           if (json.containsKey('wifiOnlySync') && json['wifiOnlySync'] is bool) {
             _wifiOnlySync = json['wifiOnlySync'] as bool;
@@ -533,8 +650,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             }
           }
           if (mounted) setState(() {});
-          debugPrint('[Config] Loaded persistent configuration successfully');
+          debugPrint('[Config] Loaded persistent configuration successfully (role=$_selectedRole, remember=$_rememberRole)');
         }
+      }
+      if (mounted) {
+        setState(() {});
       }
     } catch (e) {
       debugPrint('[Config] Failed to load app config: $e');
@@ -553,13 +673,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'version': '1.2.2',
         'customDeviceName': _customDeviceName,
         'receiveDestination': _receiveDestination,
+        'isDefaultDestinationSet': _isDefaultDestinationSet,
         'wifiOnlySync': _wifiOnlySync,
         'backgroundSyncEnabled': _backgroundSyncEnabled,
         'rememberRole': _rememberRole,
         'savedRole': _rememberRole ? _selectedRole.name : 'none',
         'folders': _folders.map((f) => f.toJson()).toList(),
       };
-      await configFile.writeAsString(jsonEncode(json));
+      final encoded = jsonEncode(json);
+      await configFile.writeAsString(encoded);
+      if (Platform.isAndroid) {
+        try {
+          final extFile = File('/storage/emulated/0/Download/P2Pme/.p2pme_config.json');
+          await extFile.writeAsString(encoded);
+        } catch (_) {}
+      }
       debugPrint('[Config] App configuration saved');
     } catch (e) {
       debugPrint('[Config] Failed to save app config: $e');
@@ -1487,6 +1615,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (!lanSuccess && wanHost != null && wanHost.isNotEmpty && wanHost != ip) {
               await _probeIp(client, wanHost, targetPort: wanPort ?? port, authToken: authToken, wanHost: wanHost, wanPort: wanPort);
             }
+            CameraBackupService.instance.probeReceiverStorage(ip, port);
           }
         }
       }
@@ -1774,6 +1903,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final pending = CameraBackupService.instance.pendingAssetsCount;
     if (pending == 0) return;
 
+    // Low-Battery Safeguard: Pause auto-backup if battery < 15% and discharging
+    final battery = await CameraBackupService.instance.getBatteryStatus();
+    final level = battery['level'] as int? ?? 100;
+    final isCharging = battery['isCharging'] as bool? ?? true;
+    if (level < 15 && !isCharging) {
+      debugPrint('[CameraBackup] Battery low ($level%) and discharging. Auto-backup paused for safety.');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ Auto-backup paused: battery is low ($level%). Connect charger to resume.'),
+            duration: const Duration(seconds: 4),
+            backgroundColor: Colors.orange.shade800,
+          ),
+        );
+      }
+      return;
+    }
+
     _isAutoBackingUp = true;
     try {
       final token = activePeer.authToken ?? _savedPairedServer?.authToken ?? _hubSecretKey ?? _webDropSessionToken;
@@ -1789,11 +1936,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
 
       if (transferred > 0 && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✓ Automatically backed up $transferred new photo(s) to ${activePeer.name}!'),
-            backgroundColor: GooglePhotosColors.green,
-          ),
+        _showTransferCompleteDialog(
+          title: 'Auto-Backup Complete',
+          message: 'Automatically backed up $transferred new photo(s) to ${activePeer.name}.',
+          fileCount: transferred,
+          peerName: activePeer.name,
+          isSender: true,
         );
       }
     } catch (_) {
@@ -1827,6 +1975,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return;
     }
 
+    // Low-Battery Safeguard: Confirm before heavy manual backup if battery < 15% and discharging
+    final battery = await CameraBackupService.instance.getBatteryStatus();
+    final level = battery['level'] as int? ?? 100;
+    final isCharging = battery['isCharging'] as bool? ?? true;
+    if (level < 15 && !isCharging && mounted) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.battery_alert_rounded, color: Colors.orange, size: 24),
+              SizedBox(width: 8),
+              Text('Low Battery Warning', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Text(
+            'Your device battery is at $level% and discharging. Uploading large photo batches consumes substantial power.\n\nDo you want to proceed anyway or connect your charger first?',
+            style: const TextStyle(fontSize: 13, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel / Plug In'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.orange.shade800),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Proceed Anyway'),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+    }
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Backing up camera roll to ${targetPeer.name} (${targetPeer.ip})...')),
@@ -1849,12 +2033,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✓ Successfully backed up $transferred photo(s) to ${targetPeer.name}!'),
-          backgroundColor: GooglePhotosColors.green,
-        ),
-      );
+      if (transferred > 0) {
+        _showTransferCompleteDialog(
+          title: 'Backup Complete',
+          message: 'Successfully backed up $transferred photo(s) to ${targetPeer.name}.',
+          fileCount: transferred,
+          peerName: targetPeer.name,
+          isSender: true,
+        );
+      }
       setState(() {});
     }
   }
@@ -1952,6 +2139,305 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  bool get _isTransferInProgress {
+    final isSending = CameraBackupService.instance.isSyncing || _isDirectSendingActive;
+    final isReceiving = _isReceivingActive || _isReceivingDrop;
+    return isSending || isReceiving;
+  }
+
+  void _resetTransferState() {
+    _isReceivingActive = false;
+    _isReceivingDrop = false;
+    _isDirectSendingActive = false;
+    _receivingFileName = null;
+    _receivingSenderDeviceName = null;
+    _receivingSenderIp = null;
+    _receivingSpeedMBps = 0.0;
+    _receivingProgressRatio = 0.0;
+    _receivingCurrentFileIndex = 0;
+    _receivingTotalFiles = 0;
+    _receivingBatchTotalBytes = 0;
+    _receivingBatchBytesReceived = 0;
+    _receivingCurrentFileTotalBytes = 0;
+    _receivingCurrentFileBytesReceived = 0;
+  }
+
+  Future<bool> _requestRoleSwitch(AppRole newRole) async {
+    if (_isTransferInProgress) {
+      final shouldAbort = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+              SizedBox(width: 10),
+              Text('Active Transfer'),
+            ],
+          ),
+          content: Text(
+            (_isReceivingActive || _isReceivingDrop)
+                ? 'You are currently receiving files from ${_receivingSenderDeviceName ?? "a peer"}'
+                  '${_receivingTotalFiles > 0 ? " (File $_receivingCurrentFileIndex of $_receivingTotalFiles)" : ""}. '
+                  'Switching roles will cancel this incoming transfer.'
+                : (_isDirectSendingActive
+                    ? 'You are currently beaming files to a nearby device. Switching roles will cancel this transfer.'
+                    : 'You are currently uploading files to ${_savedPairedServer?.name ?? "your server"}'
+                      '${CameraBackupService.instance.pendingAssetsCount > 0 ? " (File ${CameraBackupService.instance.currentSyncIndex} of ${CameraBackupService.instance.pendingAssetsCount})" : ""}. '
+                      'Switching roles will cancel this upload.'),
+            style: const TextStyle(fontSize: 13, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Keep Transferring'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: GooglePhotosColors.red),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Abort & Switch Role'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldAbort != true) {
+        return false;
+      }
+
+      if (CameraBackupService.instance.isSyncing) {
+        CameraBackupService.instance.pauseSync();
+      }
+    }
+
+    _resetTransferState();
+    await _selectRole(newRole);
+    return true;
+  }
+
+  /// Explicit Transfer Completion Notification Dialog (Requires user to Close)
+  void _showTransferCompleteDialog({
+    required String title,
+    required String message,
+    required int fileCount,
+    int? totalBytes,
+    String? peerName,
+    String? destinationPath,
+    bool isSender = false,
+  }) {
+    if (!mounted) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: GooglePhotosColors.green.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_circle_rounded, color: GooglePhotosColors.green, size: 28),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.4,
+                color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF3C4043),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF303134) : const Color(0xFFF1F3F4),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                children: [
+                  _detailRow('Files Transferred', '$fileCount file${fileCount == 1 ? "" : "s"}', isDark),
+                  if (totalBytes != null && totalBytes > 0) ...[
+                    const SizedBox(height: 8),
+                    _detailRow('Total Size', CameraBackupService.formatBytes(totalBytes), isDark),
+                  ],
+                  if (peerName != null && peerName.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _detailRow(isSender ? 'Destination' : 'Received From', peerName, isDark),
+                  ],
+                  if (destinationPath != null && destinationPath.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _detailRow('Saved Location', destinationPath, isDark, isPath: true),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: GooglePhotosColors.blue,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              minimumSize: const Size(100, 42),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value, bool isDark, {bool isPath = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontWeight: FontWeight.w500)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                fontFamily: isPath ? 'monospace' : null,
+                color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Destination Folder Confirmation Dialog before receiving
+  Future<bool> _confirmDestinationBeforeReceive() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    bool setAsDefault = true;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) => AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Row(
+            children: [
+              Icon(Icons.folder_shared_rounded, color: GooglePhotosColors.blue, size: 26),
+              SizedBox(width: 10),
+              Flexible(child: Text('Confirm Save Location', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Incoming files will be saved in this folder on your device:', style: TextStyle(fontSize: 13, height: 1.4)),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF303134) : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: isDark ? const Color(0xFF5F6368) : const Color(0xFFDADCE0)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.folder_open_rounded, size: 20, color: GooglePhotosColors.blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _receiveDestination,
+                        style: const TextStyle(fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.w600),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setDialogState(() => setAsDefault = !setAsDefault),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: Checkbox(
+                        value: setAsDefault,
+                        activeColor: GooglePhotosColors.blue,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        onChanged: (v) => setDialogState(() => setAsDefault = v ?? false),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Flexible(
+                      child: Text(
+                        'Set as permanent default destination folder',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(ctx, false);
+                await _pickDestinationFolder();
+              },
+              child: const Text('Change Folder'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: GooglePhotosColors.blue,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              onPressed: () {
+                if (setAsDefault) {
+                  setState(() => _isDefaultDestinationSet = true);
+                  _saveAppConfig();
+                }
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('Confirm & Receive'),
+            ),
+          ],
+        ),
+      ),
+    );
+    return result ?? false;
+  }
+
   /// Apply a new role: manages the HTTP server lifecycle accordingly.
   Future<void> _selectRole(AppRole role) async {
     if (!mounted) return;
@@ -1962,6 +2448,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Sender: HTTP server must be OFF – pure client
       if (_isWebDropServerRunning) {
         await _stopWebDropServer();
+      }
+      // Pre-flight probe target server storage so sender immediately sees available space
+      final target = _savedPairedServer?.isPaired == true
+          ? _savedPairedServer
+          : _nearbyPeers.cast<NearbyPeer?>().firstWhere(
+                (p) => p != null && p.isPaired,
+                orElse: () => null,
+              );
+      if (target != null) {
+        CameraBackupService.instance.probeReceiverStorage(target.ip, target.port);
       }
       // Auto-start backup scan immediately when switching to sender
       CameraBackupService.instance.scanCameraRoll().then((_) {
@@ -1975,6 +2471,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!_isWebDropServerRunning) {
         await _startWebDropServer();
       }
+      // Proactively check and prompt for storage permission if needed on Android 11+
+      _checkAndPromptAllFilesAccess();
     } else {
       // none: stop server, go back to selector
       if (_isWebDropServerRunning) {
@@ -2336,7 +2834,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
-      final outFile = File('${destDir.path}${Platform.pathSeparator}$safeName');
+      final resolvedPath = _resolveUniqueFilePath(destDir.path, safeName);
+      final outFile = File(resolvedPath);
+      final finalFileName = resolvedPath.split(Platform.pathSeparator).last;
+      final bool wasRenamed = finalFileName != safeName;
+      if (wasRenamed) {
+        debugPrint('[CollisionResolver] Filename collision detected for $safeName -> auto-renamed to $finalFileName');
+      }
+
       IOSink? sink;
       int receivedThisFile = 0;
       final Stopwatch sampleWatch = Stopwatch()..start();
@@ -2348,15 +2853,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final batchBytesSent = int.tryParse(request.headers.value('X-Batch-Bytes-Sent') ?? request.uri.queryParameters['batchSent'] ?? '0') ?? 0;
       final senderName = request.headers.value('X-Sender-Device-Name') ?? request.uri.queryParameters['senderDevice'] ?? 'Connected Sender';
       final senderIp = request.connectionInfo?.remoteAddress.address;
+      final sessionId = '${senderIp ?? "unknown"}_$senderName';
+
+      final session = ActiveReceiverSession(
+        sessionId: sessionId,
+        senderName: senderName,
+        senderIp: senderIp,
+        fileName: finalFileName,
+        fileIndex: fileIndex,
+        totalFiles: totalBatchFiles,
+        batchTotalBytes: batchTotalBytes,
+        batchBytesReceived: batchBytesSent,
+        fileTotalBytes: totalExpectedBytes,
+        fileBytesReceived: 0,
+        speedMBps: 0.0,
+        progressRatio: 0.0,
+        lastUpdated: DateTime.now(),
+      );
 
       if (mounted) {
         setState(() {
+          _activeReceiverSessions[sessionId] = session;
           _isReceivingActive = true;
-          _receivingFileName = safeName;
+          _receivingFileName = finalFileName;
           _receivingSenderDeviceName = senderName;
           _receivingSenderIp = senderIp;
-          _receivingSpeedMBps = 0.0;
-          _receivingProgressRatio = 0.0;
           _receivingCurrentFileIndex = fileIndex;
           _receivingTotalFiles = totalBatchFiles;
           _receivingBatchTotalBytes = batchTotalBytes;
@@ -2372,18 +2893,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           sink.add(chunk);
           receivedThisFile += chunk.length;
           bytesSinceSample += chunk.length;
+          session.fileBytesReceived = receivedThisFile;
+          session.batchBytesReceived = batchBytesSent + receivedThisFile;
           _receivingCurrentFileBytesReceived = receivedThisFile;
 
           if (sampleWatch.elapsedMilliseconds >= 200) {
             final double seconds = sampleWatch.elapsedMicroseconds / 1000000.0;
             if (seconds > 0) {
               final speed = (bytesSinceSample / seconds) / (1024 * 1024);
+              session.speedMBps = speed;
+              if (totalExpectedBytes > 0) {
+                session.progressRatio = (receivedThisFile / totalExpectedBytes).clamp(0.0, 1.0);
+              }
+              session.lastUpdated = DateTime.now();
+
               if (mounted) {
                 setState(() {
-                  _receivingSpeedMBps = speed;
-                  if (totalExpectedBytes > 0) {
-                    _receivingProgressRatio = (receivedThisFile / totalExpectedBytes).clamp(0.0, 1.0);
-                  }
+                  final totalSpeed = _activeReceiverSessions.values.fold<double>(0.0, (acc, s) => acc + s.speedMBps);
+                  _receivingSpeedMBps = totalSpeed;
+                  _receivingProgressRatio = session.progressRatio;
                   _receivingBatchBytesReceived = batchBytesSent + receivedThisFile;
                 });
               }
@@ -2404,11 +2932,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         } catch (_) {}
 
+        _activeReceiverSessions.remove(sessionId);
+
         if (e is FileSystemException || e.toString().toLowerCase().contains('space') || e.toString().contains('28')) {
           if (mounted) {
             setState(() {
               _isReceiverStorageFull = true;
-              _isReceivingActive = false;
+              _isReceivingActive = _activeReceiverSessions.isNotEmpty;
+              if (!_isReceivingActive) {
+                _receivingSpeedMBps = 0.0;
+              }
             });
           }
           request.response
@@ -2421,6 +2954,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           await request.response.close();
           return;
         } else {
+          if (mounted) {
+            setState(() {
+              _isReceivingActive = _activeReceiverSessions.isNotEmpty;
+              if (!_isReceivingActive) {
+                _receivingSpeedMBps = 0.0;
+              }
+            });
+          }
           request.response
             ..statusCode = HttpStatus.internalServerError
             ..write('File write error: $e');
@@ -2430,23 +2971,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       final fileLen = await outFile.length();
+      final isBatchDone = totalBatchFiles <= 0 || fileIndex >= totalBatchFiles;
+      if (isBatchDone) {
+        _activeReceiverSessions.remove(sessionId);
+      }
+
       if (mounted) {
         setState(() {
-          if (_receivingTotalFiles <= 0 || _receivingCurrentFileIndex >= _receivingTotalFiles) {
-            _isReceivingActive = false;
+          _isReceivingActive = _activeReceiverSessions.isNotEmpty;
+          if (!_isReceivingActive) {
             _receivingSpeedMBps = 0.0;
             _receivingProgressRatio = 0.0;
           }
-          _lastReceivedFromBrowser = safeName;
+          _lastReceivedFromBrowser = finalFileName;
           _receivedFiles++;
           _receivedBytes += fileLen;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.green.shade700,
-            content: Text('Received $safeName (${CameraBackupService.formatBytes(fileLen)})'),
+            content: Text('Received $finalFileName (${CameraBackupService.formatBytes(fileLen)})${wasRenamed ? " [Renamed from $safeName to prevent overwrite]" : ""}'),
           ),
         );
+        if (isBatchDone) {
+          _showTransferCompleteDialog(
+            title: 'Files Received Successfully',
+            message: 'Incoming transfer complete. All files were verified and saved directly into your destination folder.${wasRenamed ? "\n\nNote: Duplicate filenames were automatically given timestamp suffixes to preserve your existing files." : ""}',
+            fileCount: totalBatchFiles > 0 ? totalBatchFiles : 1,
+            totalBytes: batchTotalBytes > 0 ? batchTotalBytes : fileLen,
+            peerName: senderName,
+            destinationPath: _receiveDestination,
+            isSender: false,
+          );
+        }
       }
 
       request.response
@@ -2676,181 +3233,196 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            // Google Photos style 4-color pinwheel indicator
-            SizedBox(
-              width: 28,
-              height: 28,
-              child: Stack(
-                children: [
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.red, shape: BoxShape.circle)),
-                  ),
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.blue, shape: BoxShape.circle)),
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.yellow, shape: BoxShape.circle)),
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.green, shape: BoxShape.circle)),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
+    return PopScope(
+      canPop: _selectedRole == AppRole.none && !_isTransferInProgress,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (!didPop && _selectedRole != AppRole.none) {
+          await _requestRoleSwitch(AppRole.none);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          titleSpacing: 12,
+          title: Row(
+            children: [
+              // Google Photos style 4-color pinwheel indicator
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: Stack(
                   children: [
-                    Text(
-                      _selectedIndex == 0
-                          ? 'Transfer'
-                          : (_selectedIndex == 1 ? 'Backup' : 'Server'),
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 20,
-                        letterSpacing: -0.3,
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? const Color(0xFFE8EAED)
-                            : const Color(0xFF202124),
-                      ),
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.red, shape: BoxShape.circle)),
                     ),
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: () => _showDiagnostics(context),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? const Color(0xFF303134)
-                              : GooglePhotosColors.blue.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: Theme.of(context).brightness == Brightness.dark
-                                ? const Color(0xFF5F6368)
-                                : GooglePhotosColors.blue.withValues(alpha: 0.25),
-                            width: 0.8,
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.blue, shape: BoxShape.circle)),
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.yellow, shape: BoxShape.circle)),
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(width: 12, height: 12, decoration: const BoxDecoration(color: GooglePhotosColors.green, shape: BoxShape.circle)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            _selectedRole == AppRole.none
+                                ? 'P2Pme'
+                                : (_selectedRole == AppRole.sender
+                                    ? 'Sender'
+                                    : (_selectedRole == AppRole.receiver ? 'Receiver' : 'Server Hub')),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 18,
+                              letterSpacing: -0.3,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? const Color(0xFFE8EAED)
+                                  : const Color(0xFF202124),
+                            ),
                           ),
                         ),
-                        child: Text(
-                          'v$_currentVersionName',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.2,
-                            color: Theme.of(context).brightness == Brightness.dark
-                                ? const Color(0xFF8AB4F8)
-                                : GooglePhotosColors.blue,
+                        if (_selectedRole == AppRole.none) ...[
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () => _showDiagnostics(context),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).brightness == Brightness.dark
+                                    ? const Color(0xFF303134)
+                                    : GooglePhotosColors.blue.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? const Color(0xFF5F6368)
+                                      : GooglePhotosColors.blue.withValues(alpha: 0.25),
+                                  width: 0.8,
+                                ),
+                              ),
+                              child: Text(
+                                'v$_currentVersionName',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.2,
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? const Color(0xFF8AB4F8)
+                                      : GooglePhotosColors.blue,
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
+                      ],
+                    ),
+                    Text(
+                      _selectedRole == AppRole.none
+                          ? 'Select device role'
+                          : (_selectedRole == AppRole.sender
+                              ? 'Back up & beam'
+                              : (_selectedRole == AppRole.receiver
+                                  ? 'Standby to receive'
+                                  : '24/7 dedicated hub')),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? const Color(0xFF9AA0A6)
+                            : const Color(0xFF5F6368),
                       ),
                     ),
                   ],
                 ),
-                Text(
-                  _selectedIndex == 0
-                      ? 'One-time direct transfer'
-                      : (_selectedIndex == 1
-                          ? 'Camera roll & folders'
-                          : '24/7 Home Hub & receiver'),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF9AA0A6)
-                        : const Color(0xFF5F6368),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
         actions: [
           // Role Switcher – visible once a role is chosen
           if (_selectedRole != AppRole.none)
-            Padding(
-              padding: const EdgeInsets.only(left: 4),
-              child: GestureDetector(
-                onTap: () => _selectRole(AppRole.none),
-                child: Container(
-                  margin: const EdgeInsets.symmetric(vertical: 10),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _selectedRole == AppRole.sender
-                        ? GooglePhotosColors.blue.withValues(alpha: 0.12)
-                        : (_selectedRole == AppRole.receiver
-                            ? GooglePhotosColors.green.withValues(alpha: 0.12)
-                            : const Color(0xFF8430CE).withValues(alpha: 0.1)),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: _selectedRole == AppRole.sender
-                          ? GooglePhotosColors.blue.withValues(alpha: 0.4)
-                          : (_selectedRole == AppRole.receiver
-                              ? GooglePhotosColors.green.withValues(alpha: 0.4)
-                              : const Color(0xFF8430CE).withValues(alpha: 0.3)),
-                      width: 1,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _selectedRole == AppRole.sender
-                            ? Icons.cloud_upload_outlined
-                            : (_selectedRole == AppRole.receiver
-                                ? Icons.download_for_offline_outlined
-                                : Icons.dns_outlined),
-                        size: 13,
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => _requestRoleSwitch(AppRole.none),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                      decoration: BoxDecoration(
                         color: _selectedRole == AppRole.sender
-                            ? GooglePhotosColors.blue
+                            ? GooglePhotosColors.blue.withValues(alpha: 0.12)
                             : (_selectedRole == AppRole.receiver
-                                ? GooglePhotosColors.green
-                                : const Color(0xFF8430CE)),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _selectedRole == AppRole.sender
-                            ? 'Sender'
-                            : (_selectedRole == AppRole.receiver ? 'Receiver' : 'Server'),
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
+                                ? GooglePhotosColors.green.withValues(alpha: 0.12)
+                                : const Color(0xFF8430CE).withValues(alpha: 0.12)),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
                           color: _selectedRole == AppRole.sender
-                              ? GooglePhotosColors.blue
+                              ? GooglePhotosColors.blue.withValues(alpha: 0.4)
                               : (_selectedRole == AppRole.receiver
-                                  ? GooglePhotosColors.green
-                                  : const Color(0xFF8430CE)),
+                                  ? GooglePhotosColors.green.withValues(alpha: 0.4)
+                                  : const Color(0xFF8430CE).withValues(alpha: 0.35)),
+                          width: 1,
                         ),
                       ),
-                      const SizedBox(width: 3),
-                      Icon(Icons.swap_horiz_rounded,
-                          size: 11,
-                          color: _selectedRole == AppRole.sender
-                              ? GooglePhotosColors.blue
-                              : (_selectedRole == AppRole.receiver
-                                  ? GooglePhotosColors.green
-                                  : const Color(0xFF8430CE))),
-                    ],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _isTransferInProgress ? Icons.lock_outline_rounded : Icons.swap_horiz_rounded,
+                            size: 14,
+                            color: _selectedRole == AppRole.sender
+                                ? GooglePhotosColors.blue
+                                : (_selectedRole == AppRole.receiver
+                                    ? GooglePhotosColors.green
+                                    : const Color(0xFF8430CE)),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _isTransferInProgress ? 'Locked' : 'Switch',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _selectedRole == AppRole.sender
+                                  ? GooglePhotosColors.blue
+                                  : (_selectedRole == AppRole.receiver
+                                      ? GooglePhotosColors.green
+                                      : const Color(0xFF8430CE)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
           IconButton(
-            icon: const Icon(Icons.help_outline_rounded, size: 22),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.help_outline_rounded, size: 20),
             tooltip: 'Connection Guide & Setup',
             onPressed: () => _showRemoteConnectionGuide(context),
           ),
@@ -2902,34 +3474,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
       ),
-      bottomNavigationBar: _selectedRole == AppRole.none ? null : Center(
-        heightFactor: 1.0,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: NavigationBar(
-            selectedIndex: _selectedIndex,
-            onDestinationSelected: (idx) => setState(() => _selectedIndex = idx),
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.swap_horiz_outlined),
-                selectedIcon: Icon(Icons.swap_horiz_rounded),
-                label: 'Transfer',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.cloud_sync_outlined),
-                selectedIcon: Icon(Icons.cloud_sync_rounded),
-                label: 'Backup',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.dns_outlined),
-                selectedIcon: Icon(Icons.dns_rounded),
-                label: 'Server',
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+      bottomNavigationBar: null,
+    ),
+  );
   }
 
   Widget _buildUpdateBanner(bool isDark) {
@@ -3006,18 +3553,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildBody() {
-    if (_selectedRole == AppRole.none) {
-      return _buildRoleSelectionScreen();
-    }
-    switch (_selectedIndex) {
-      case 0:
-        return _buildTransferTab();
-      case 1:
-        return _buildBackupTab();
-      case 2:
-        return _buildServerTab();
-      default:
-        return _buildTransferTab();
+    switch (_selectedRole) {
+      case AppRole.none:
+        return _buildRoleSelectionScreen();
+      case AppRole.sender:
+        return _buildDedicatedSenderScreen();
+      case AppRole.receiver:
+        return _buildDedicatedReceiverScreen();
+      case AppRole.server:
+        return _buildDedicatedServerScreen();
     }
   }
 
@@ -3044,64 +3588,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       required Color badgeBg,
       required VoidCallback onTap,
     }) {
-      return GestureDetector(
-        onTap: onTap,
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: cardBg,
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: borderCol, width: 1.2),
+          boxShadow: [
+            BoxShadow(
+              color: iconColor.withValues(alpha: 0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: borderCol, width: 1.2),
-            boxShadow: [
-              BoxShadow(
-                color: iconColor.withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
-                child: Icon(icon, color: iconColor, size: 28),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                            color: textPrimary)),
-                    const SizedBox(height: 4),
-                    Text(subtitle,
-                        style: TextStyle(fontSize: 12, color: textSec, height: 1.4)),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: badgeBg,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(badge,
-                          style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: badgeColor)),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
+                    child: Icon(icon, color: iconColor, size: 28),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title,
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16,
+                                color: textPrimary)),
+                        const SizedBox(height: 4),
+                        Text(subtitle,
+                            style: TextStyle(fontSize: 12, color: textSec, height: 1.4)),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: badgeBg,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(badge,
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: badgeColor)),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      color: textSec, size: 24),
+                ],
               ),
-              Icon(Icons.chevron_right_rounded,
-                  color: textSec, size: 24),
-            ],
+            ),
           ),
         ),
       );
@@ -3111,7 +3661,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       color: bg,
       child: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          padding: EdgeInsets.fromLTRB(0, 16, 0, 24 + MediaQuery.of(context).padding.bottom),
           child: Column(
             children: [
               const SizedBox(height: 16),
@@ -3147,10 +3697,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 badge: 'CLIENT ONLY  •  SERVER ENGINE OFF',
                 badgeColor: GooglePhotosColors.blue,
                 badgeBg: GooglePhotosColors.blue.withValues(alpha: 0.1),
-                onTap: () {
-                  _selectRole(AppRole.sender);
-                  setState(() => _selectedIndex = 1); // Open Backup tab
-                },
+                onTap: () => _selectRole(AppRole.sender),
               ),
               // ── RECEIVER ──
               roleCard(
@@ -3163,13 +3710,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 badge: 'TEMPORARY SERVER  •  6-DIGIT PIN & QR',
                 badgeColor: GooglePhotosColors.green,
                 badgeBg: GooglePhotosColors.green.withValues(alpha: 0.1),
-                onTap: () {
-                  _selectRole(AppRole.receiver);
-                  setState(() {
-                    _selectedIndex = 0; // Open Transfer tab
-                    _quickDropTab = 1;  // Open Drop Receive view
-                  });
-                },
+                onTap: () => _selectRole(AppRole.receiver),
               ),
               // ── SERVER ──
               roleCard(
@@ -3182,34 +3723,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 badge: '24/7 ALWAYS LISTENING  •  MASTER KEY PROTECTED',
                 badgeColor: const Color(0xFF8430CE),
                 badgeBg: const Color(0xFF8430CE).withValues(alpha: 0.08),
-                onTap: () {
-                  _selectRole(AppRole.server);
-                  setState(() => _selectedIndex = 2); // Open Server tab
-                },
+                onTap: () => _selectRole(AppRole.server),
               ),
               const SizedBox(height: 20),
               // Remember checkbox
               GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () => setState(() => _rememberRole = !_rememberRole),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: Checkbox(
-                        value: _rememberRole,
-                        onChanged: (v) =>
-                            setState(() => _rememberRole = v ?? false),
-                        activeColor: GooglePhotosColors.blue,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(4)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: Checkbox(
+                          value: _rememberRole,
+                          onChanged: (v) =>
+                              setState(() => _rememberRole = v ?? false),
+                          activeColor: GooglePhotosColors.blue,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4)),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Text('Remember my choice on this device',
-                        style: TextStyle(fontSize: 13, color: textSec)),
-                  ],
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          'Remember my choice on this device',
+                          style: TextStyle(fontSize: 13, color: textSec),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -3221,23 +3769,139 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   // ==========================================
-  // TAB 1: ONE-TIME DIRECT TRANSFER (NEARBY + PIN)
+  // DEDICATED SENDER SCREEN (CAMERA BACKUP + QUICK BEAM)
   // ==========================================
-  Widget _buildTransferTab() {
-    return _buildQuickDropScreen();
+  Widget _buildDedicatedSenderScreen() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ListView(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 24 + MediaQuery.of(context).padding.bottom),
+      children: [
+        // Channel A: Continuous Camera Roll & Folder Backup
+        _buildCameraRollAutoBackupCard(),
+        _buildConnectedServerCard(isDark),
+        const SizedBox(height: 14),
+        // Channel B: One-Time Quick Beam (Direct Send to Anyone)
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? GooglePhotosColors.darkCard : GooglePhotosColors.lightCard,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isDark ? GooglePhotosColors.darkBorder : GooglePhotosColors.lightBorder,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: GooglePhotosColors.blue.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.flash_on_rounded, color: GooglePhotosColors.blue, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Quick Beam (Direct to Anyone)',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124),
+                          ),
+                        ),
+                        Text(
+                          'Beam photos or files to any nearby phone or PC without stopping server backup.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              _buildDropSendView(),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Synchronized Folders (${_folders.length})',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            FilledButton.tonalIcon(
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                minimumSize: const Size(0, 32),
+              ),
+              onPressed: _showAddFolderModal,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Add Folder', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_folders.isEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF202124) : Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: isDark ? const Color(0xFF3C4043) : const Color(0xFFE8EAED)),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.folder_open_rounded, size: 36, color: Colors.grey.shade400),
+                const SizedBox(height: 8),
+                const Text('No extra folders added', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Text(
+                  'Tap "+ Add Folder" above to synchronize additional document or media folders.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          )
+        else
+          ..._folders.map((folder) => _buildFolderCard(folder)),
+      ],
+    );
   }
 
   // ==========================================
-  // TAB 2: CONTINUOUS BACKUP & FOLDERS
+  // DEDICATED RECEIVER SCREEN (STANDBY RECEIVER + PIN / QR)
   // ==========================================
-  Widget _buildBackupTab() {
-    return _buildFolderList();
+  Widget _buildDedicatedReceiverScreen() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(18, 14, 18, 24 + MediaQuery.of(context).padding.bottom),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Direct Drop Receive View (hosts _buildLiveReceivingIngestionCard, PIN, QR, IP, Port, Destination Folder)
+          _buildDropReceiveView(),
+        ],
+      ),
+    );
   }
 
   // ==========================================
-  // TAB 3: 24/7 BACKUP SERVER & HUB SETTINGS
+  // DEDICATED SERVER SCREEN (24/7 DEDICATED HUB)
   // ==========================================
-  Widget _buildServerTab() {
+  Widget _buildDedicatedServerScreen() {
     return _buildServerScreen();
   }
 
@@ -3259,66 +3923,75 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     int totalBytesSent = 0;
 
+    setState(() => _isDirectSendingActive = true);
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
-    for (var path in _selectedFilePaths) {
-      final file = File(path);
-      if (!await file.exists()) continue;
-      final fileName = path.split(Platform.pathSeparator).last;
-      try {
-        final tokenToSend = peer.authToken ?? _webDropSessionToken;
-        final url = Uri.parse('http://${peer.ip}:${peer.port}/upload?name=${Uri.encodeComponent(fileName)}&token=$tokenToSend&fileIndex=${sent + 1}&totalFiles=$total&batchTotal=$totalBytes&batchSent=$totalBytesSent&senderDevice=${Uri.encodeComponent(_myDeviceName)}');
-        final req = await client.postUrl(url);
-        final len = await file.length();
-        req.headers.contentLength = len;
-        req.headers.contentType = ContentType.binary;
-        req.headers.set('X-File-Index', (sent + 1).toString());
-        req.headers.set('X-Total-Files', total.toString());
-        req.headers.set('X-Batch-Total-Bytes', totalBytes.toString());
-        req.headers.set('X-Batch-Bytes-Sent', totalBytesSent.toString());
-        req.headers.set('X-Sender-Device-Name', _myDeviceName);
+    try {
+      for (var path in _selectedFilePaths) {
+        final file = File(path);
+        if (!await file.exists()) continue;
+        final fileName = path.split(Platform.pathSeparator).last;
+        try {
+          final tokenToSend = peer.authToken ?? _webDropSessionToken;
+          final url = Uri.parse('http://${peer.ip}:${peer.port}/upload?name=${Uri.encodeComponent(fileName)}&token=$tokenToSend&fileIndex=${sent + 1}&totalFiles=$total&batchTotal=$totalBytes&batchSent=$totalBytesSent&senderDevice=${Uri.encodeComponent(_myDeviceName)}');
+          final req = await client.postUrl(url);
+          final len = await file.length();
+          req.headers.contentLength = len;
+          req.headers.contentType = ContentType.binary;
+          req.headers.set('X-File-Index', (sent + 1).toString());
+          req.headers.set('X-Total-Files', total.toString());
+          req.headers.set('X-Batch-Total-Bytes', totalBytes.toString());
+          req.headers.set('X-Batch-Bytes-Sent', totalBytesSent.toString());
+          req.headers.set('X-Sender-Device-Name', _myDeviceName);
 
-        final Stopwatch sampleWatch = Stopwatch()..start();
-        int bytesSinceSample = 0;
-        double currentSpeedMBps = 0.0;
+          final Stopwatch sampleWatch = Stopwatch()..start();
+          int bytesSinceSample = 0;
+          double currentSpeedMBps = 0.0;
 
-        await for (final chunk in file.openRead()) {
-          req.add(chunk);
-          bytesSinceSample += chunk.length;
-          totalBytesSent += chunk.length;
+          await for (final chunk in file.openRead()) {
+            req.add(chunk);
+            bytesSinceSample += chunk.length;
+            totalBytesSent += chunk.length;
 
-          if (sampleWatch.elapsedMilliseconds >= 200) {
-            final double s = sampleWatch.elapsedMicroseconds / 1000000.0;
-            if (s > 0) currentSpeedMBps = (bytesSinceSample / s) / (1024 * 1024);
-            sampleWatch.reset();
-            bytesSinceSample = 0;
+            if (sampleWatch.elapsedMilliseconds >= 200) {
+              final double s = sampleWatch.elapsedMicroseconds / 1000000.0;
+              if (s > 0) currentSpeedMBps = (bytesSinceSample / s) / (1024 * 1024);
+              sampleWatch.reset();
+              bytesSinceSample = 0;
+            }
           }
-        }
-        final resp = await req.close();
-        if (resp.statusCode == HttpStatus.ok) {
-          sent++;
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('✓ Sent $fileName (${currentSpeedMBps > 0 ? "${currentSpeedMBps.toStringAsFixed(1)} MB/s" : "done"})'),
-                backgroundColor: GooglePhotosColors.green,
-                duration: const Duration(seconds: 2),
-              ),
-            );
+          final resp = await req.close();
+          if (resp.statusCode == HttpStatus.ok) {
+            sent++;
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('✓ Sent $fileName (${currentSpeedMBps > 0 ? "${currentSpeedMBps.toStringAsFixed(1)} MB/s" : "done"})'),
+                  backgroundColor: GooglePhotosColors.green,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
           }
+        } catch (e) {
+          debugPrint('Direct drop upload failed for $fileName: $e');
         }
-      } catch (e) {
-        debugPrint('Direct drop upload failed for $fileName: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDirectSendingActive = false);
       }
     }
 
     if (mounted) {
       if (sent > 0) {
         setState(() => _selectedFilePaths.clear());
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✓ Successfully transferred $sent file(s) to ${peer.name}!'),
-            backgroundColor: GooglePhotosColors.green,
-          ),
+        _showTransferCompleteDialog(
+          title: 'Files Beamed Successfully',
+          message: 'All selected files were transferred directly to ${peer.name}.',
+          fileCount: sent,
+          totalBytes: totalBytesSent > 0 ? totalBytesSent : totalBytes,
+          peerName: peer.name,
+          isSender: true,
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3379,9 +4052,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   children: [
                     Text(
                       _isReceivingActive
-                          ? (_receivingTotalFiles > 0
-                              ? 'Receiving from ${_receivingSenderDeviceName ?? "Sender"}${_receivingSenderIp != null ? " ($_receivingSenderIp)" : ""} • File $_receivingCurrentFileIndex of $_receivingTotalFiles'
-                              : 'Receiving from ${_receivingSenderDeviceName ?? "Sender"}${_receivingSenderIp != null ? " ($_receivingSenderIp)" : ""}...')
+                          ? (_activeReceiverSessions.length > 1
+                              ? 'Receiving from ${_activeReceiverSessions.length} devices simultaneously'
+                              : (_receivingTotalFiles > 0
+                                  ? 'Receiving from ${_receivingSenderDeviceName ?? "Sender"}${_receivingSenderIp != null ? " ($_receivingSenderIp)" : ""} • File $_receivingCurrentFileIndex of $_receivingTotalFiles'
+                                  : 'Receiving from ${_receivingSenderDeviceName ?? "Sender"}${_receivingSenderIp != null ? " ($_receivingSenderIp)" : ""}...'))
                           : 'Receiver Ingestion Status',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
@@ -3393,8 +4068,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _isReceivingActive && _receivingFileName != null
-                          ? 'Saving: $_receivingFileName • Direct download'
+                      _isReceivingActive
+                          ? (_activeReceiverSessions.length > 1
+                              ? 'Active senders: ${_activeReceiverSessions.values.map((s) => s.senderName).toSet().join(", ")}'
+                              : (_receivingFileName != null
+                                  ? 'Saving: $_receivingFileName • Direct download'
+                                  : 'Active download in progress'))
                           : 'Total: $_receivedFiles files (${CameraBackupService.formatBytes(_receivedBytes)}) ingested',
                       style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                       overflow: TextOverflow.ellipsis,
@@ -3410,7 +4089,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    'Downloading: ${_receivingSpeedMBps.toStringAsFixed(1)} MB/s',
+                    _activeReceiverSessions.length > 1
+                        ? '${_receivingSpeedMBps.toStringAsFixed(1)} MB/s Combined'
+                        : 'Downloading: ${_receivingSpeedMBps.toStringAsFixed(1)} MB/s',
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
                   ),
                 ),
@@ -3505,6 +4186,55 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _showServerSendFileSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      constraints: const BoxConstraints(maxWidth: 640),
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return Container(
+          height: MediaQuery.of(ctx).size.height * 0.75,
+          decoration: BoxDecoration(
+            color: isDark ? GooglePhotosColors.darkCard : GooglePhotosColors.lightCard,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Send File from Server', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(ctx).pop()),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: _buildDropSendView(),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // ==========================================
   // TAB 3: 24/7 BACKUP SERVER & HUB SETTINGS
   // ==========================================
@@ -3513,7 +4243,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final serverUrl = 'http://${_localIpAddress ?? "192.168.178.35"}:$_webDropPort';
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: EdgeInsets.fromLTRB(18, 14, 18, 24 + MediaQuery.of(context).padding.bottom),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3550,16 +4280,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            '24/7 Backup Server',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 16,
-                              color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124),
+                          Flexible(
+                            child: Text(
+                              '24/7 Backup Server',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                                color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124),
+                              ),
                             ),
                           ),
-                          const Spacer(),
+                          const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
@@ -3657,20 +4392,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     icon: const Icon(Icons.arrow_upward_rounded, size: 16),
                     label: const Text('Send File', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                    onPressed: () {
-                      // Allow sending one-time file from server mode without stopping the hub
-                      setState(() {
-                        _selectedIndex = 0;
-                        _quickDropTab = 0; // Drop send view
-                      });
-                    },
+                    onPressed: _showServerSendFileSheet,
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton.filledTonal(
                   tooltip: 'Switch Role',
                   icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-                  onPressed: () => _selectRole(AppRole.none),
+                  onPressed: () => _requestRoleSwitch(AppRole.none),
                 ),
               ],
             ),
@@ -3805,9 +4534,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     children: [
                       const Icon(Icons.folder_shared_outlined, color: GooglePhotosColors.blue, size: 20),
                       const SizedBox(width: 8),
-                      const Text(
-                        'Receiver Storage Location',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      const Flexible(
+                        child: Text(
+                          'Receiver Storage Location',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ],
                   ),
@@ -3870,9 +4603,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     children: [
                       const Icon(Icons.key_rounded, color: GooglePhotosColors.green, size: 20),
                       const SizedBox(width: 8),
-                      const Text(
-                        'Server Connection & Pairing',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      const Flexible(
+                        child: Text(
+                          'Server Connection & Pairing',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ],
                   ),
@@ -3925,7 +4662,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Expanded(
                         child: OutlinedButton.icon(
                           icon: const Icon(Icons.copy, size: 14),
-                          label: const Text('Copy Address', style: TextStyle(fontSize: 12)),
+                          label: const Text('Copy Address', style: TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
                           onPressed: () {
                             Clipboard.setData(ClipboardData(text: serverUrl));
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -3938,7 +4675,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Expanded(
                         child: OutlinedButton.icon(
                           icon: const Icon(Icons.key, size: 14),
-                          label: const Text('Copy Key', style: TextStyle(fontSize: 12)),
+                          label: const Text('Copy Key', style: TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
                           onPressed: () {
                             if (_hubSecretKey != null) {
                               Clipboard.setData(ClipboardData(text: _hubSecretKey!));
@@ -3969,7 +4706,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Expanded(
                         child: OutlinedButton.icon(
                           icon: const Icon(Icons.usb_rounded, size: 14),
-                          label: const Text('Cable Guide', style: TextStyle(fontSize: 11)),
+                          label: const Text('Cable Guide', style: TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
                           onPressed: _showUsbCableGuide,
                         ),
                       ),
@@ -4264,6 +5001,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             ],
                           ),
                         ),
+                        // Platform Realities & Architecture Pro-Tips Card
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1E2824) : const Color(0xFFE6F4EA),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: isDark ? const Color(0xFF2B4C38) : const Color(0xFFCEEAD6)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.lightbulb_outline_rounded, size: 16, color: GooglePhotosColors.green),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Platform Pro-Tips (iOS, Android & Cellular)',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark ? const Color(0xFF81C995) : const Color(0xFF137333),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '• 📱 iPhone Background Policy: Apple iOS shuts down listening background network sockets after ~30s of screen-lock. Use iPhone as a Sender or On-Demand Receiver. For a 24/7 Server Hub, Android, PC, or iPhone in Kiosk mode (plugged in with screen on) is recommended.\n'
+                                '• 🌐 5G & Cellular Carrier NAT: Direct P2P over cellular CGNAT can be restricted by carriers. For 100% reliable WAN backups outside home Wi-Fi, connect peers via Tailscale/WireGuard or enter your Server\'s public WAN domain.\n'
+                                '• 🛡️ Non-Destructive Storage: Duplicate incoming filenames are automatically preserved using timestamp suffixes (e.g. IMG_0001_20261117_1330.JPG) to guarantee zero photo overwrites.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  height: 1.4,
+                                  color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF3C4043),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                         // Hub address and token summary card
                         Container(
                           padding: const EdgeInsets.all(16),
@@ -4511,107 +5288,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ==========================================
-  // QUICK DROP SCREEN (EASY OPERATION FOR KIDS)
-  // ==========================================
-  Widget _buildQuickDropScreen() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Google Photos style Direct Transfer card
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? GooglePhotosColors.darkCard
-                  : GooglePhotosColors.lightCard,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? GooglePhotosColors.darkBorder
-                    : GooglePhotosColors.lightBorder,
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF174EA6)
-                        : GooglePhotosColors.blueSurface,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.sync_alt_rounded,
-                    color: GooglePhotosColors.blue,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Direct transfer',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 16,
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? const Color(0xFFE8EAED)
-                              : const Color(0xFF202124),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Send photos and files directly to another phone or computer.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? const Color(0xFF9AA0A6)
-                              : const Color(0xFF5F6368),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Clean Mode Toggle (Send / Receive)
-          Center(
-            child: SegmentedButton<int>(
-              expandedInsets: EdgeInsets.zero,
-              segments: const [
-                ButtonSegment(
-                  value: 0,
-                  label: Text('Send', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                  icon: Icon(Icons.arrow_upward_rounded, size: 18),
-                ),
-                ButtonSegment(
-                  value: 1,
-                  label: Text('Receive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                  icon: Icon(Icons.arrow_downward_rounded, size: 18),
-                ),
-              ],
-              selected: {_quickDropTab},
-              onSelectionChanged: (set) => setState(() => _quickDropTab = set.first),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          if (_quickDropTab == 0) _buildDropSendView() else _buildDropReceiveView(),
-        ],
-      ),
-    );
-  }
-
   Widget _buildDropSendView() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4783,35 +5459,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Nearby Wi-Fi',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey.shade600),
+              Flexible(
+                child: Text(
+                  'Nearby Wi-Fi',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey.shade600),
+                ),
               ),
-              Row(
-                children: [
-                  TextButton.icon(
-                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                    onPressed: () => _openQrScanner(),
-                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 14),
-                    label: const Text('Scan QR', style: TextStyle(fontSize: 11)),
+              Flexible(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                        ),
+                        onPressed: () => _openQrScanner(),
+                        icon: const Icon(Icons.qr_code_scanner_rounded, size: 14),
+                        label: const Text('QR', style: TextStyle(fontSize: 11)),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                        ),
+                        onPressed: _promptConnectByIp,
+                        icon: const Icon(Icons.wifi_find_rounded, size: 14),
+                        label: const Text('IP', style: TextStyle(fontSize: 11)),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                        ),
+                        onPressed: _isScanningNearby ? null : _scanNearby,
+                        icon: _isScanningNearby
+                            ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
+                            : const Icon(Icons.refresh, size: 14),
+                        label: Text(_isScanningNearby ? 'Scanning' : 'Refresh', style: const TextStyle(fontSize: 11)),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 4),
-                  TextButton.icon(
-                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                    onPressed: _promptConnectByIp,
-                    icon: const Icon(Icons.wifi_find_rounded, size: 14),
-                    label: const Text('Add by IP', style: TextStyle(fontSize: 11)),
-                  ),
-                  const SizedBox(width: 4),
-                  TextButton.icon(
-                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                    onPressed: _isScanningNearby ? null : _scanNearby,
-                    icon: _isScanningNearby
-                        ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
-                        : const Icon(Icons.refresh, size: 14),
-                    label: Text(_isScanningNearby ? 'Scanning...' : 'Scan Wi-Fi', style: const TextStyle(fontSize: 11)),
-                  ),
-                ],
+                ),
               ),
             ],
           ),
@@ -4995,6 +5690,104 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildReceiverDestinationCard(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF282A2D) : const Color(0xFFF1F3F4),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _isDefaultDestinationSet
+              ? GooglePhotosColors.green.withValues(alpha: 0.4)
+              : (isDark ? const Color(0xFF3C4043) : const Color(0xFFDADCE0)),
+          width: 1.2,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _isDefaultDestinationSet
+                  ? GooglePhotosColors.green.withValues(alpha: 0.12)
+                  : GooglePhotosColors.blue.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.folder_special_rounded,
+              color: _isDefaultDestinationSet ? GooglePhotosColors.green : GooglePhotosColors.blue,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Save Destination',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124),
+                        ),
+                      ),
+                    ),
+                    if (_isDefaultDestinationSet) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: GooglePhotosColors.green.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'DEFAULT',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: GooglePhotosColors.green,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _receiveDestination,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonal(
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+              minimumSize: const Size(0, 32),
+              visualDensity: VisualDensity.compact,
+            ),
+            onPressed: _pickDestinationFolder,
+            child: const Text('Change', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDropReceiveView() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final webUrl = _localIpAddress != null
@@ -5004,6 +5797,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _buildReceiverDestinationCard(isDark),
+        const SizedBox(height: 12),
         if (_isReceivingActive || _receivedFiles > 0) ...[
           _buildLiveReceivingIngestionCard(isDark),
           const SizedBox(height: 12),
@@ -5127,9 +5922,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     children: [
                       const Icon(Icons.shield_outlined, size: 14, color: Colors.green),
                       const SizedBox(width: 4),
-                      Text(
-                        '128-Bit Token: ${_webDropSessionToken.substring(0, 8)}••',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green.shade800),
+                      Flexible(
+                        child: Text(
+                          '128-Bit Token: ${_webDropSessionToken.substring(0, 8)}••',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green.shade800),
+                        ),
                       ),
                       const SizedBox(width: 6),
                       InkWell(
@@ -5179,17 +5978,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         const SizedBox(height: 16),
 
         // Divider OR ENTER PIN
-        const Row(
+        Row(
           children: [
-            Expanded(child: Divider()),
+            const Expanded(child: Divider()),
             Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Text(
-                'OR ENTER 6-DIGIT PIN FROM P2PME APP',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
+                'OR ENTER 6-DIGIT PIN',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.grey.shade400 : Colors.grey,
+                ),
               ),
             ),
-            Expanded(child: Divider()),
+            const Expanded(child: Divider()),
           ],
         ),
         const SizedBox(height: 14),
@@ -5322,63 +6125,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ==========================================
-  // AUTO-SYNC FOLDERS LIST & BACKUP TAB
-  // ==========================================
-  Widget _buildFolderList() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      children: [
-        _buildCameraRollAutoBackupCard(),
-        _buildConnectedServerCard(isDark),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Synchronized Folders (${_folders.length})',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            FilledButton.tonalIcon(
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                minimumSize: const Size(0, 32),
-              ),
-              onPressed: _showAddFolderModal,
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text('Add Folder', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (_folders.isEmpty)
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF202124) : Colors.grey.shade50,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isDark ? const Color(0xFF3C4043) : const Color(0xFFE8EAED)),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.folder_open_rounded, size: 40, color: Colors.grey.shade400),
-                const SizedBox(height: 10),
-                const Text('No folders added yet', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text(
-                  'Tap "+ Add Folder" above to back up photos or synchronize folders.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-              ],
-            ),
-          )
-        else
-          ..._folders.map((folder) => _buildFolderCard(folder)),
-      ],
-    );
-  }
+
 
   Widget _buildConnectedServerCard(bool isDark) {
     final livePeer = _nearbyPeers.cast<NearbyPeer?>().firstWhere(
@@ -5645,6 +6392,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 640),
       backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -5846,6 +6594,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 640),
       backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -6188,9 +6937,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     children: [
                       Row(
                         children: [
-                          Text(
-                            Platform.isIOS ? 'iPhone Camera Roll' : 'Camera Photos & Videos',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          Flexible(
+                            child: Text(
+                              Platform.isIOS ? 'iPhone Camera Roll' : 'Camera Photos & Videos',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                            ),
                           ),
                           const SizedBox(width: 6),
                           Container(
@@ -6239,9 +6992,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 ? 'Sending to ${targetPeer?.name ?? "Server"}${targetPeer?.ip != null ? " (${targetPeer!.ip})" : ""} • File ${service.currentSyncIndex} of ${service.pendingAssetsCount} (${service.currentSyncingFilename})'
                                 : (isPaused
                                     ? 'Backup paused (${service.formattedBatchBytes}) • Tap "Resume Backup" to continue'
-                                    : (service.totalDeviceAssets > 0
-                                        ? '${service.totalDeviceAssets} photos on device • ${service.pendingAssetsCount} pending backup (${service.formattedPendingBytes})'
-                                        : 'One-way automatic camera backup to server.'))),
+                                    : (targetPeer != null
+                                        ? 'Target: ${targetPeer.name}${targetPeer.ip.isNotEmpty ? " (${targetPeer.ip})" : ""} • ${service.pendingAssetsCount} photos pending (${service.formattedPendingBytes})'
+                                        : (service.totalDeviceAssets > 0
+                                            ? '${service.totalDeviceAssets} photos on device • ${service.pendingAssetsCount} pending backup (${service.formattedPendingBytes})'
+                                            : 'One-way automatic camera backup to server.')))),
                         style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -6359,7 +7114,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             // ── Receiver Storage Telemetry ──────────────────────────────────
-            if (receiverFree != null && receiverFree > 0) ...[
+            if (targetPeer != null) ...[
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -6387,10 +7142,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        showStorageLow
-                            ? '⚠️ Receiver storage low: ${(receiverFree / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB free for ${CameraBackupService.formatBytes(service.batchTotalBytes)} batch'
-                            : '💾 Receiver Storage: ${(receiverFree / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB free'
-                                '${receiverTotal != null && receiverTotal > 0 ? " of ${(receiverTotal / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB" : ""}',
+                        receiverFree != null && receiverFree > 0
+                            ? (showStorageLow
+                                ? '⚠️ Receiver storage low: ${(receiverFree / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB free for ${CameraBackupService.formatBytes(service.batchTotalBytes)} batch'
+                                : '💾 Receiver Storage: ${(receiverFree / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB free'
+                                    '${receiverTotal != null && receiverTotal > 0 ? " of ${(receiverTotal / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB" : ""}')
+                            : '💾 Receiver Storage: Checking ${targetPeer.name} (${targetPeer.ip})...',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: showStorageLow ? FontWeight.w600 : FontWeight.normal,
@@ -6587,13 +7344,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.speed, size: 16, color: Colors.blue),
-                          SizedBox(width: 6),
-                          Text('Direct LAN Speed:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                        ],
+                      const Flexible(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.speed, size: 16, color: Colors.blue),
+                            SizedBox(width: 6),
+                            Flexible(child: Text('Direct LAN Speed:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          ],
+                        ),
                       ),
+                      const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
@@ -6611,28 +7372,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.lock_outline, size: 16, color: Colors.green),
-                          SizedBox(width: 6),
-                          Text('Transport & Crypto:', style: TextStyle(fontSize: 12)),
-                        ],
+                      const Flexible(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.lock_outline, size: 16, color: Colors.green),
+                            SizedBox(width: 6),
+                            Flexible(child: Text('Transport & Crypto:', style: TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          ],
+                        ),
                       ),
-                      Text('QUIC UDP • TLS 1.3', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text('QUIC UDP • TLS 1.3', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.change_circle_outlined, size: 16, color: Colors.purple),
-                          SizedBox(width: 6),
-                          Text('Smart Delta Sync:', style: TextStyle(fontSize: 12)),
-                        ],
+                      const Flexible(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.change_circle_outlined, size: 16, color: Colors.purple),
+                            SizedBox(width: 6),
+                            Flexible(child: Text('Smart Delta Sync:', style: TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          ],
+                        ),
                       ),
-                      Text('Only new/changed files sent', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text('Only new files sent', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
                     ],
                   ),
                 ],
@@ -7054,6 +7827,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 640),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -7300,6 +8074,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _pickDestinationFolder() async {
+    await _checkAndPromptAllFilesAccess();
+    if (!mounted) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final folderController = TextEditingController(text: _receiveDestination);
 
@@ -7327,123 +8103,154 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     await showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (modalContext, setModalState) => AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          title: Row(
-            children: [
-              const Icon(Icons.create_new_folder_rounded, color: GooglePhotosColors.blue, size: 24),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Text(
-                  'Receiver Destination',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(ctx),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+      builder: (ctx) {
+        bool setAsDefault = _isDefaultDestinationSet;
+        return StatefulBuilder(
+          builder: (modalContext, setModalState) => AlertDialog(
+            backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            title: Row(
               children: [
-                Text(
-                  'Where incoming drops and 24/7 backups will be saved on this device.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 14),
-                const Text('Quick Location Presets', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                ...presets.map((preset) {
-                  final isSelected = folderController.text == preset['path'];
-                  return ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(preset['icon'] as IconData, color: isSelected ? GooglePhotosColors.blue : Colors.grey, size: 20),
-                    title: Text(preset['name'] as String, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, fontSize: 13)),
-                    subtitle: Text(preset['path'] as String, style: const TextStyle(fontSize: 11)),
-                    trailing: isSelected ? const Icon(Icons.check_circle, color: GooglePhotosColors.blue, size: 18) : null,
-                    onTap: () {
-                      setModalState(() {
-                        folderController.text = preset['path'] as String;
-                      });
-                    },
-                  );
-                }),
-                const SizedBox(height: 12),
-                const Text('Or Create / Enter Custom Folder', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: folderController,
-                  decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.folder_open_rounded, size: 18),
-                    hintText: 'e.g. $basePath/MyBackups',
-                    filled: true,
-                    fillColor: isDark ? const Color(0xFF303134) : Colors.grey.shade100,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                const Icon(Icons.create_new_folder_rounded, color: GooglePhotosColors.blue, size: 24),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Receiver Destination',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(ctx),
                 ),
               ],
             ),
-          ),
-          actions: [
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Where incoming drops and 24/7 backups will be saved on this device.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text('Quick Location Presets', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  ...presets.map((preset) {
+                    final isSelected = folderController.text == preset['path'];
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(preset['icon'] as IconData, color: isSelected ? GooglePhotosColors.blue : Colors.grey, size: 20),
+                      title: Text(preset['name'] as String, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, fontSize: 13)),
+                      subtitle: Text(preset['path'] as String, style: const TextStyle(fontSize: 11)),
+                      trailing: isSelected ? const Icon(Icons.check_circle, color: GooglePhotosColors.blue, size: 18) : null,
+                      onTap: () {
+                        setModalState(() {
+                          folderController.text = preset['path'] as String;
+                        });
+                      },
+                    );
+                  }),
+                  const SizedBox(height: 12),
+                  const Text('Or Create / Enter Custom Folder', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: folderController,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.folder_open_rounded, size: 18),
+                      hintText: 'e.g. $basePath/MyBackups',
+                      filled: true,
+                      fillColor: isDark ? const Color(0xFF303134) : Colors.grey.shade100,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                  ),
+                  const SizedBox(height: 14),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setModalState(() => setAsDefault = !setAsDefault),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: Checkbox(
+                            value: setAsDefault,
+                            activeColor: GooglePhotosColors.blue,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                            onChanged: (v) => setModalState(() => setAsDefault = v ?? false),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Flexible(
+                          child: Text(
+                            'Set as permanent default destination folder',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              icon: const Icon(Icons.folder_open, size: 16),
-              label: const Text('Browse'),
-              onPressed: () async {
-                try {
-                  final picked = await FilePicker.getDirectoryPath();
-                  if (picked != null) {
-                    setModalState(() {
-                      folderController.text = picked;
-                    });
-                  }
-                } catch (_) {}
-              },
             ),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: GooglePhotosColors.blue,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              icon: const Icon(Icons.check, size: 16),
-              label: const Text('Save Location'),
-              onPressed: () {
-                final path = folderController.text.trim();
-                if (path.isNotEmpty) {
+            actions: [
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                ),
+                icon: const Icon(Icons.folder_open, size: 16),
+                label: const Text('Browse'),
+                onPressed: () async {
                   try {
-                    final dir = Directory(path);
-                    if (!dir.existsSync()) {
-                      dir.createSync(recursive: true);
+                    final picked = await FilePicker.getDirectoryPath();
+                    if (picked != null) {
+                      setModalState(() {
+                        folderController.text = picked;
+                      });
                     }
                   } catch (_) {}
-                  setState(() {
-                    _receiveDestination = path;
-                  });
-                  _saveAppConfig();
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Save destination set to: $path'),
-                      backgroundColor: GooglePhotosColors.blue,
-                    ),
-                  );
-                }
-              },
-            ),
-          ],
-        ),
-      ),
+                },
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: GooglePhotosColors.blue,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                ),
+                icon: const Icon(Icons.check, size: 16),
+                label: const Text('Save Location'),
+                onPressed: () {
+                  final path = folderController.text.trim();
+                  if (path.isNotEmpty) {
+                    try {
+                      final dir = Directory(path);
+                      if (!dir.existsSync()) {
+                        dir.createSync(recursive: true);
+                      }
+                    } catch (_) {}
+                    setState(() {
+                      _receiveDestination = path;
+                      _isDefaultDestinationSet = setAsDefault;
+                    });
+                    _saveAppConfig();
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Save destination set to: $path${setAsDefault ? " (Default)" : ""}'),
+                        backgroundColor: GooglePhotosColors.blue,
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -7479,7 +8286,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _handleReceiveDrop() {
+  Future<void> _handleReceiveDrop() async {
     final pin = _pinInputController.text.trim();
     final ticket = _ticketInputController.text.trim();
 
@@ -7489,6 +8296,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
       return;
     }
+
+    // Always ensure receiver destination is confirmed before receiving
+    if (!_isDefaultDestinationSet) {
+      final confirmed = await _confirmDestinationBeforeReceive();
+      if (!confirmed) return;
+    }
+    await _checkAndPromptAllFilesAccess();
+    if (!mounted) return;
 
     setState(() {
       _isReceivingDrop = true;
@@ -7511,6 +8326,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _receiveMessage =
               'Downloaded and verified $_receivedFiles file(s) (${(_receivedBytes / 1024).toStringAsFixed(1)} KB) directly into $_receiveDestination. Sender session self-destructed.';
         });
+        _showTransferCompleteDialog(
+          title: 'Drop Download Complete',
+          message: 'Successfully downloaded and verified all files directly into your destination folder.',
+          fileCount: _receivedFiles,
+          totalBytes: _receivedBytes,
+          destinationPath: _receiveDestination,
+          isSender: false,
+        );
       } else {
         setState(() {
           _isReceivingDrop = false;
@@ -7531,6 +8354,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 640),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
