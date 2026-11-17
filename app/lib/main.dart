@@ -356,6 +356,11 @@ class NearbyPeer {
   });
 }
 
+// ==========================================
+// ROLE SELECTION
+// ==========================================
+enum AppRole { none, sender, receiver, server }
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -368,6 +373,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _nodeId;
   int _listeningPort = 0;
   bool _isEngineReady = false;
+
+  // ── Role Selection ──────────────────────────────────────────────────────────
+  // none = show role picker; sender = client only (server OFF);
+  // receiver = temporary HTTP server; server = 24/7 hub (HTTP server ON)
+  AppRole _selectedRole = AppRole.none;
+  bool _rememberRole = false;
 
   final List<SyncFolderItem> _folders = [
     SyncFolderItem(
@@ -388,6 +399,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _customDeviceName;
   String? _serverBindError;
   String? _receivingSenderDeviceName;
+  String? _receivingSenderIp;
+  bool _isServerPaused = false;
 
   // Quick Drop State
   int _quickDropTab = 0; // 0 = Send, 1 = Receive
@@ -496,6 +509,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (json.containsKey('backgroundSyncEnabled') && json['backgroundSyncEnabled'] is bool) {
             _backgroundSyncEnabled = json['backgroundSyncEnabled'] as bool;
           }
+          if (json.containsKey('rememberRole') && json['rememberRole'] is bool) {
+            _rememberRole = json['rememberRole'] as bool;
+          }
+          if (_rememberRole && json.containsKey('savedRole') && json['savedRole'] is String) {
+            final roleStr = json['savedRole'] as String;
+            _selectedRole = AppRole.values.firstWhere(
+              (r) => r.name == roleStr,
+              orElse: () => AppRole.none,
+            );
+            if (_selectedRole == AppRole.receiver || _selectedRole == AppRole.server) {
+              _startWebDropServer();
+            }
+          }
           if (json.containsKey('folders') && json['folders'] is List) {
             final folderList = (json['folders'] as List)
                 .map((f) => SyncFolderItem.fromJson(f as Map<String, dynamic>))
@@ -524,11 +550,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       final configFile = File('$baseDir${Platform.pathSeparator}.p2pme_config.json');
       final json = {
-        'version': '1.2.1',
+        'version': '1.2.2',
         'customDeviceName': _customDeviceName,
         'receiveDestination': _receiveDestination,
         'wifiOnlySync': _wifiOnlySync,
         'backgroundSyncEnabled': _backgroundSyncEnabled,
+        'rememberRole': _rememberRole,
+        'savedRole': _rememberRole ? _selectedRole.name : 'none',
         'folders': _folders.map((f) => f.toJson()).toList(),
       };
       await configFile.writeAsString(jsonEncode(json));
@@ -702,8 +730,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 15;
-  String _currentVersionName = '1.2.1';
+  int _currentVersionCode = 16;
+  String _currentVersionName = '1.2.2';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -1001,7 +1029,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadAppConfig();
+    _loadAppConfig(); // loads _selectedRole and _rememberRole from disk
     _initDeviceName();
     _checkLocalStorageSpace();
     _webDropSessionToken = _generateSessionToken();
@@ -1009,7 +1037,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _initServerWanUrl();
     _initEngine();
     _checkBackgroundServiceStatus();
-    _startWebDropServer();
+    // NOTE: _startWebDropServer() is now ONLY called when the user picks
+    // AppRole.receiver or AppRole.server in the role-selection screen.
+    // AppRole.sender keeps the HTTP server completely OFF.
     _startNearbyBeacon();
     _loadPairedServer();
     CameraBackupService.instance.onNewAssetsDetected = () {
@@ -1728,14 +1758,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isAutoBackingUp = false;
 
   Future<void> _triggerAutoCameraBackup() async {
+    // Only run auto-backup in Sender role and only to an explicitly paired server
+    if (_selectedRole != AppRole.sender) return;
     if (_isAutoBackingUp) return;
-    final activePeer = _nearbyPeers.isNotEmpty
-        ? _nearbyPeers.firstWhere(
-            (p) => p.deviceType.toLowerCase() == 'android' || p.name.toLowerCase().contains('oneplus') || p.deviceType.toLowerCase() == 'pc',
-            orElse: () => _nearbyPeers.first,
-          )
-        : _savedPairedServer;
+
+    // Strictly require a paired server – never fall back to an un-paired peer
+    final activePeer = _savedPairedServer?.isPaired == true
+        ? _savedPairedServer
+        : _nearbyPeers.cast<NearbyPeer?>().firstWhere(
+              (p) => p != null && p.isPaired,
+              orElse: () => null,
+            );
     if (activePeer == null) return;
+
     final pending = CameraBackupService.instance.pendingAssetsCount;
     if (pending == 0) return;
 
@@ -1773,18 +1808,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await _scanNearby();
     }
 
-    final targetPeer = _nearbyPeers.isNotEmpty
-        ? _nearbyPeers.firstWhere(
-            (p) => p.isPaired || p.deviceType.toLowerCase() == 'android' || p.deviceType.toLowerCase() == 'pc',
-            orElse: () => _nearbyPeers.first,
-          )
-        : _savedPairedServer;
+    // Strictly require a paired server - never fall back to un-paired peers
+    final targetPeer = _savedPairedServer?.isPaired == true
+        ? _savedPairedServer
+        : _nearbyPeers.cast<NearbyPeer?>().firstWhere(
+              (p) => p != null && p.isPaired,
+              orElse: () => null,
+            );
 
     if (targetPeer == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No backup server found. Pair with your server in Tab 2 or connect via Wi-Fi/cable.'),
+            content: Text('No paired backup server found. Scan your server\'s QR code to pair.'),
           ),
         );
       }
@@ -1913,6 +1949,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _isWebDropServerRunning = false;
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  /// Apply a new role: manages the HTTP server lifecycle accordingly.
+  Future<void> _selectRole(AppRole role) async {
+    if (!mounted) return;
+    final previousRole = _selectedRole;
+    setState(() => _selectedRole = role);
+
+    if (role == AppRole.sender) {
+      // Sender: HTTP server must be OFF – pure client
+      if (_isWebDropServerRunning) {
+        await _stopWebDropServer();
+      }
+      // Auto-start backup scan immediately when switching to sender
+      CameraBackupService.instance.scanCameraRoll().then((_) {
+        if (mounted) {
+          setState(() {});
+          _triggerAutoCameraBackup();
+        }
+      });
+    } else if (role == AppRole.receiver || role == AppRole.server) {
+      // Receiver / Server: HTTP server must be ON
+      if (!_isWebDropServerRunning) {
+        await _startWebDropServer();
+      }
+    } else {
+      // none: stop server, go back to selector
+      if (_isWebDropServerRunning) {
+        await _stopWebDropServer();
+      }
+    }
+
+    // Persist role choice if "remember" is ticked
+    if (_rememberRole || previousRole != AppRole.none) {
+      await _saveAppConfig();
     }
   }
 
@@ -2214,6 +2286,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
+      // Check if server ingestion is paused by host
+      if (_isServerPaused) {
+        request.response
+          ..statusCode = HttpStatus.serviceUnavailable
+          ..headers.contentType = ContentType.text
+          ..write('Server ingestion is paused by host');
+        await request.response.close();
+        return;
+      }
+
       final name = request.uri.queryParameters['name'] ?? 'received_${DateTime.now().millisecondsSinceEpoch}';
       final cleanBaseName = name.split(RegExp(r'[\\/]')).last;
       final safeName = cleanBaseName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
@@ -2265,12 +2347,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final batchTotalBytes = int.tryParse(request.headers.value('X-Batch-Total-Bytes') ?? request.uri.queryParameters['batchTotal'] ?? '0') ?? 0;
       final batchBytesSent = int.tryParse(request.headers.value('X-Batch-Bytes-Sent') ?? request.uri.queryParameters['batchSent'] ?? '0') ?? 0;
       final senderName = request.headers.value('X-Sender-Device-Name') ?? request.uri.queryParameters['senderDevice'] ?? 'Connected Sender';
+      final senderIp = request.connectionInfo?.remoteAddress.address;
 
       if (mounted) {
         setState(() {
           _isReceivingActive = true;
           _receivingFileName = safeName;
           _receivingSenderDeviceName = senderName;
+          _receivingSenderIp = senderIp;
           _receivingSpeedMBps = 0.0;
           _receivingProgressRatio = 0.0;
           _receivingCurrentFileIndex = fileIndex;
@@ -2696,6 +2780,75 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
         ),
         actions: [
+          // Role Switcher – visible once a role is chosen
+          if (_selectedRole != AppRole.none)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: GestureDetector(
+                onTap: () => _selectRole(AppRole.none),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _selectedRole == AppRole.sender
+                        ? GooglePhotosColors.blue.withValues(alpha: 0.12)
+                        : (_selectedRole == AppRole.receiver
+                            ? GooglePhotosColors.green.withValues(alpha: 0.12)
+                            : const Color(0xFF8430CE).withValues(alpha: 0.1)),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: _selectedRole == AppRole.sender
+                          ? GooglePhotosColors.blue.withValues(alpha: 0.4)
+                          : (_selectedRole == AppRole.receiver
+                              ? GooglePhotosColors.green.withValues(alpha: 0.4)
+                              : const Color(0xFF8430CE).withValues(alpha: 0.3)),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _selectedRole == AppRole.sender
+                            ? Icons.cloud_upload_outlined
+                            : (_selectedRole == AppRole.receiver
+                                ? Icons.download_for_offline_outlined
+                                : Icons.dns_outlined),
+                        size: 13,
+                        color: _selectedRole == AppRole.sender
+                            ? GooglePhotosColors.blue
+                            : (_selectedRole == AppRole.receiver
+                                ? GooglePhotosColors.green
+                                : const Color(0xFF8430CE)),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _selectedRole == AppRole.sender
+                            ? 'Sender'
+                            : (_selectedRole == AppRole.receiver ? 'Receiver' : 'Server'),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: _selectedRole == AppRole.sender
+                              ? GooglePhotosColors.blue
+                              : (_selectedRole == AppRole.receiver
+                                  ? GooglePhotosColors.green
+                                  : const Color(0xFF8430CE)),
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      Icon(Icons.swap_horiz_rounded,
+                          size: 11,
+                          color: _selectedRole == AppRole.sender
+                              ? GooglePhotosColors.blue
+                              : (_selectedRole == AppRole.receiver
+                                  ? GooglePhotosColors.green
+                                  : const Color(0xFF8430CE))),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.help_outline_rounded, size: 22),
             tooltip: 'Connection Guide & Setup',
@@ -2749,7 +2902,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
       ),
-      bottomNavigationBar: Center(
+      bottomNavigationBar: _selectedRole == AppRole.none ? null : Center(
         heightFactor: 1.0,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 680),
@@ -2853,6 +3006,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildBody() {
+    if (_selectedRole == AppRole.none) {
+      return _buildRoleSelectionScreen();
+    }
     switch (_selectedIndex) {
       case 0:
         return _buildTransferTab();
@@ -2863,6 +3019,205 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       default:
         return _buildTransferTab();
     }
+  }
+
+  // ==========================================
+  // ROLE SELECTION SCREEN
+  // ==========================================
+
+  Widget _buildRoleSelectionScreen() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? GooglePhotosColors.darkBg : GooglePhotosColors.lightBg;
+    final cardBg = isDark ? GooglePhotosColors.darkCard : GooglePhotosColors.lightCard;
+    final borderCol = isDark ? GooglePhotosColors.darkBorder : GooglePhotosColors.lightBorder;
+    final textPrimary = isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124);
+    final textSec = isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368);
+
+    Widget roleCard({
+      required IconData icon,
+      required Color iconColor,
+      required Color iconBg,
+      required String title,
+      required String subtitle,
+      required String badge,
+      required Color badgeColor,
+      required Color badgeBg,
+      required VoidCallback onTap,
+    }) {
+      return GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: borderCol, width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: iconColor.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
+                child: Icon(icon, color: iconColor, size: 28),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                            color: textPrimary)),
+                    const SizedBox(height: 4),
+                    Text(subtitle,
+                        style: TextStyle(fontSize: 12, color: textSec, height: 1.4)),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: badgeBg,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(badge,
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: badgeColor)),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded,
+                  color: textSec, size: 24),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      color: bg,
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            children: [
+              const SizedBox(height: 16),
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  children: [
+                    Text('What is this device doing?',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            color: textPrimary)),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Choose your role for this session.\nYou can switch at any time from the top bar.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, color: textSec, height: 1.5),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              // ── SENDER ──
+              roleCard(
+                icon: Icons.cloud_upload_outlined,
+                iconColor: GooglePhotosColors.blue,
+                iconBg: GooglePhotosColors.blue.withValues(alpha: 0.12),
+                title: 'Sender  (Back Up & Beam)',
+                subtitle:
+                    'Back up your camera roll or beam photos and files to your server or a nearby phone.',
+                badge: 'CLIENT ONLY  •  SERVER ENGINE OFF',
+                badgeColor: GooglePhotosColors.blue,
+                badgeBg: GooglePhotosColors.blue.withValues(alpha: 0.1),
+                onTap: () {
+                  _selectRole(AppRole.sender);
+                  setState(() => _selectedIndex = 1); // Open Backup tab
+                },
+              ),
+              // ── RECEIVER ──
+              roleCard(
+                icon: Icons.download_for_offline_outlined,
+                iconColor: GooglePhotosColors.green,
+                iconBg: GooglePhotosColors.green.withValues(alpha: 0.12),
+                title: 'Receiver  (Quick Receive)',
+                subtitle:
+                    'Receive photos or files one-time from another phone, computer, or web browser via PIN / QR.',
+                badge: 'TEMPORARY SERVER  •  6-DIGIT PIN & QR',
+                badgeColor: GooglePhotosColors.green,
+                badgeBg: GooglePhotosColors.green.withValues(alpha: 0.1),
+                onTap: () {
+                  _selectRole(AppRole.receiver);
+                  setState(() {
+                    _selectedIndex = 0; // Open Transfer tab
+                    _quickDropTab = 1;  // Open Drop Receive view
+                  });
+                },
+              ),
+              // ── SERVER ──
+              roleCard(
+                icon: Icons.dns_outlined,
+                iconColor: const Color(0xFF8430CE),
+                iconBg: const Color(0xFF8430CE).withValues(alpha: 0.1),
+                title: 'Server  (24/7 Dedicated Hub)',
+                subtitle:
+                    'Keep this phone or PC constantly connected to receive backups from all family devices.',
+                badge: '24/7 ALWAYS LISTENING  •  MASTER KEY PROTECTED',
+                badgeColor: const Color(0xFF8430CE),
+                badgeBg: const Color(0xFF8430CE).withValues(alpha: 0.08),
+                onTap: () {
+                  _selectRole(AppRole.server);
+                  setState(() => _selectedIndex = 2); // Open Server tab
+                },
+              ),
+              const SizedBox(height: 20),
+              // Remember checkbox
+              GestureDetector(
+                onTap: () => setState(() => _rememberRole = !_rememberRole),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: Checkbox(
+                        value: _rememberRole,
+                        onChanged: (v) =>
+                            setState(() => _rememberRole = v ?? false),
+                        activeColor: GooglePhotosColors.blue,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text('Remember my choice on this device',
+                        style: TextStyle(fontSize: 13, color: textSec)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ==========================================
@@ -2977,6 +3332,180 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   // ==========================================
+  // REAL-TIME INCOMING INGESTION TELEMETRY CARD
+  // ==========================================
+  Widget _buildLiveReceivingIngestionCard(bool isDark) {
+    if (!_isReceivingActive && _receivedFiles == 0) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _isReceivingActive
+            ? GooglePhotosColors.green.withValues(alpha: 0.12)
+            : (isDark ? GooglePhotosColors.darkCard : GooglePhotosColors.lightCard),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _isReceivingActive
+              ? GooglePhotosColors.green.withValues(alpha: 0.6)
+              : (isDark ? GooglePhotosColors.darkBorder : GooglePhotosColors.lightBorder),
+          width: _isReceivingActive ? 1.5 : 1.0,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _isReceivingActive
+                      ? GooglePhotosColors.green
+                      : (isDark ? const Color(0xFF303134) : Colors.grey.shade200),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  _isReceivingActive ? Icons.downloading_rounded : Icons.speed_rounded,
+                  color: _isReceivingActive ? Colors.white : Colors.grey,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isReceivingActive
+                          ? (_receivingTotalFiles > 0
+                              ? 'Receiving from ${_receivingSenderDeviceName ?? "Sender"}${_receivingSenderIp != null ? " ($_receivingSenderIp)" : ""} • File $_receivingCurrentFileIndex of $_receivingTotalFiles'
+                              : 'Receiving from ${_receivingSenderDeviceName ?? "Sender"}${_receivingSenderIp != null ? " ($_receivingSenderIp)" : ""}...')
+                          : 'Receiver Ingestion Status',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: _isReceivingActive
+                            ? GooglePhotosColors.green
+                            : (isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124)),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _isReceivingActive && _receivingFileName != null
+                          ? 'Saving: $_receivingFileName • Direct download'
+                          : 'Total: $_receivedFiles files (${CameraBackupService.formatBytes(_receivedBytes)}) ingested',
+                      style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              if (_isReceivingActive)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: GooglePhotosColors.green,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Downloading: ${_receivingSpeedMBps.toStringAsFixed(1)} MB/s',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                  ),
+                ),
+            ],
+          ),
+          if (_isReceivingActive) ...[
+            const SizedBox(height: 12),
+            if (_receivingBatchTotalBytes > 0) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Total Batch: ${CameraBackupService.formatBytes(_receivingBatchBytesReceived)} of ${CameraBackupService.formatBytes(_receivingBatchTotalBytes)}',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.grey.shade300 : Colors.grey.shade800),
+                  ),
+                  Text(
+                    '${((_receivingBatchBytesReceived / _receivingBatchTotalBytes) * 100).toInt().clamp(0, 100)}%',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.green),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: (_receivingBatchBytesReceived / _receivingBatchTotalBytes).clamp(0.0, 1.0),
+                  minHeight: 8,
+                  backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.2),
+                  color: GooglePhotosColors.green,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: _receivingProgressRatio > 0 ? _receivingProgressRatio : null,
+                minHeight: 4,
+                backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.15),
+                color: GooglePhotosColors.green.withValues(alpha: 0.7),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Text(
+                  _receivingProgressRatio > 0
+                      ? 'File: ${(_receivingProgressRatio * 100).toInt()}% • ${CameraBackupService.formatBytes(_receivingCurrentFileBytesReceived)} / ${CameraBackupService.formatBytes(_receivingCurrentFileTotalBytes)}'
+                      : 'Receiving chunk stream...',
+                  style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                ),
+                const Spacer(),
+                const Text('Direct Wire-Speed', style: TextStyle(fontSize: 10, color: Colors.grey)),
+              ],
+            ),
+            if (_localStorageFreeBytes > 0) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.storage_rounded, size: 12, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Device Storage: ${CameraBackupService.formatBytes(_localStorageFreeBytes)} Free remaining',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E2022) : const Color(0xFFF1F3F4),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.lock_outline_rounded, size: 12, color: Colors.grey),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      'Server Hub active: transfers are initiated and paused by the sender device.',
+                      style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
   // TAB 3: 24/7 BACKUP SERVER & HUB SETTINGS
   // ==========================================
   Widget _buildServerScreen() {
@@ -3034,17 +3563,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
-                              color: _isWebDropServerRunning
-                                  ? GooglePhotosColors.green.withValues(alpha: 0.15)
-                                  : Colors.grey.withValues(alpha: 0.15),
+                              color: _isServerPaused
+                                  ? Colors.orange.withValues(alpha: 0.15)
+                                  : (_isWebDropServerRunning
+                                      ? GooglePhotosColors.green.withValues(alpha: 0.15)
+                                      : Colors.grey.withValues(alpha: 0.15)),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
-                              _isWebDropServerRunning ? 'ONLINE' : 'STANDBY',
+                              _isServerPaused
+                                  ? 'PAUSED'
+                                  : (_isWebDropServerRunning ? 'ONLINE' : 'STANDBY'),
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
-                                color: _isWebDropServerRunning ? GooglePhotosColors.green : Colors.grey,
+                                color: _isServerPaused
+                                    ? Colors.orange.shade800
+                                    : (_isWebDropServerRunning ? GooglePhotosColors.green : Colors.grey),
                               ),
                             ),
                           ),
@@ -3066,6 +3601,80 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           const SizedBox(height: 12),
+
+          // Server Hub Actions (Pause Server, Send One-Time File, Switch Role)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF282A2D) : const Color(0xFFF1F3F4),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _isServerPaused
+                          ? Colors.orange.withValues(alpha: 0.2)
+                          : (isDark ? const Color(0xFF383A3E) : Colors.white),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    icon: Icon(
+                      _isServerPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                      size: 18,
+                      color: _isServerPaused ? Colors.orange.shade800 : (isDark ? Colors.white : Colors.black87),
+                    ),
+                    label: Text(
+                      _isServerPaused ? 'Resume Hub' : 'Pause Hub',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: _isServerPaused ? Colors.orange.shade800 : (isDark ? Colors.white : Colors.black87),
+                      ),
+                    ),
+                    onPressed: () {
+                      setState(() => _isServerPaused = !_isServerPaused);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(_isServerPaused
+                              ? 'Server Hub paused: incoming backups will wait.'
+                              : 'Server Hub active: accepting incoming backups.'),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      side: BorderSide(
+                        color: isDark ? const Color(0xFF5F6368) : const Color(0xFFDADCE0),
+                      ),
+                    ),
+                    icon: const Icon(Icons.arrow_upward_rounded, size: 16),
+                    label: const Text('Send File', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    onPressed: () {
+                      // Allow sending one-time file from server mode without stopping the hub
+                      setState(() {
+                        _selectedIndex = 0;
+                        _quickDropTab = 0; // Drop send view
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  tooltip: 'Switch Role',
+                  icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                  onPressed: () => _selectRole(AppRole.none),
+                ),
+              ],
+            ),
+          ),
 
           // Server Port Error Alert Banner
           if (_serverBindError != null) ...[
@@ -3173,159 +3782,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 12),
 
           // Live Transfer Speed & Ingestion Telemetry Card
-          if (_isReceivingActive || _receivedFiles > 0)
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: _isReceivingActive
-                    ? GooglePhotosColors.green.withValues(alpha: 0.12)
-                    : (isDark ? GooglePhotosColors.darkCard : GooglePhotosColors.lightCard),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: _isReceivingActive
-                      ? GooglePhotosColors.green.withValues(alpha: 0.6)
-                      : (isDark ? GooglePhotosColors.darkBorder : GooglePhotosColors.lightBorder),
-                  width: _isReceivingActive ? 1.5 : 1.0,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: _isReceivingActive
-                              ? GooglePhotosColors.green
-                              : (isDark ? const Color(0xFF303134) : Colors.grey.shade200),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          _isReceivingActive ? Icons.downloading_rounded : Icons.speed_rounded,
-                          color: _isReceivingActive ? Colors.white : Colors.grey,
-                          size: 20,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _isReceivingActive
-                                  ? (_receivingTotalFiles > 0
-                                      ? 'Downloading from ${_receivingSenderDeviceName ?? "Sender"} • File $_receivingCurrentFileIndex of $_receivingTotalFiles'
-                                      : 'Downloading from ${_receivingSenderDeviceName ?? "Sender"}...')
-                                  : 'Receiver Ingestion Status',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: _isReceivingActive
-                                    ? GooglePhotosColors.green
-                                    : (isDark ? const Color(0xFFE8EAED) : const Color(0xFF202124)),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              _isReceivingActive && _receivingFileName != null
-                                  ? 'Saving: $_receivingFileName • Direct download'
-                                  : 'Total: $_receivedFiles files (${CameraBackupService.formatBytes(_receivedBytes)}) ingested',
-                              style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (_isReceivingActive)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: GooglePhotosColors.green,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            'Downloading: ${_receivingSpeedMBps.toStringAsFixed(1)} MB/s',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                          ),
-                        ),
-                    ],
-                  ),
-                  if (_isReceivingActive) ...[
-                    const SizedBox(height: 12),
-                    if (_receivingBatchTotalBytes > 0) ...[
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Total Batch: ${CameraBackupService.formatBytes(_receivingBatchBytesReceived)} of ${CameraBackupService.formatBytes(_receivingBatchTotalBytes)}',
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? Colors.grey.shade300 : Colors.grey.shade800),
-                          ),
-                          Text(
-                            '${((_receivingBatchBytesReceived / _receivingBatchTotalBytes) * 100).toInt().clamp(0, 100)}%',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: GooglePhotosColors.green),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: (_receivingBatchBytesReceived / _receivingBatchTotalBytes).clamp(0.0, 1.0),
-                          minHeight: 8,
-                          backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.2),
-                          color: GooglePhotosColors.green,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: _receivingProgressRatio > 0 ? _receivingProgressRatio : null,
-                        minHeight: 4,
-                        backgroundColor: GooglePhotosColors.green.withValues(alpha: 0.15),
-                        color: GooglePhotosColors.green.withValues(alpha: 0.7),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Text(
-                          _receivingProgressRatio > 0
-                              ? 'File: ${(_receivingProgressRatio * 100).toInt()}% • ${CameraBackupService.formatBytes(_receivingCurrentFileBytesReceived)} / ${CameraBackupService.formatBytes(_receivingCurrentFileTotalBytes)}'
-                              : 'Receiving chunk stream...',
-                          style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
-                        ),
-                        const Spacer(),
-                        const Text('Direct Wire-Speed', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E2022) : const Color(0xFFF1F3F4),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.lock_outline_rounded, size: 12, color: Colors.grey),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              'Server Hub active: transfers are initiated and paused by the sender device.',
-                              style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
+          _buildLiveReceivingIngestionCard(isDark),
           const SizedBox(height: 4),
 
           // Receiver Storage Destination Card
@@ -4539,6 +4996,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildDropReceiveView() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final webUrl = _localIpAddress != null
         ? 'http://$_localIpAddress:$_webDropPort/?token=$_webDropSessionToken'
         : 'http://192.168.178.35:$_webDropPort/?token=$_webDropSessionToken';
@@ -4546,6 +5004,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (_isReceivingActive || _receivedFiles > 0) ...[
+          _buildLiveReceivingIngestionCard(isDark),
+          const SizedBox(height: 12),
+        ],
         // Card 1: Zero-Install "Scan with iPhone / Any Device to Send to Me"
         Card(
           elevation: 2,
@@ -5672,10 +6134,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isStorageFull = service.state == CameraBackupState.serverStorageFull;
     final isUpToDate = service.state == CameraBackupState.upToDate && service.pendingAssetsCount == 0;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final targetPeer = _savedPairedServer ??
-        (_nearbyPeers.isNotEmpty
-            ? _nearbyPeers.firstWhere((p) => p.isPaired, orElse: () => _nearbyPeers.first)
-            : null);
+    // Strictly use a paired server – never an un-paired fallback
+    final targetPeer = _savedPairedServer?.isPaired == true
+        ? _savedPairedServer
+        : _nearbyPeers.cast<NearbyPeer?>().firstWhere(
+              (p) => p != null && p.isPaired,
+              orElse: () => null,
+            );
+    final receiverFree = service.receiverFreeStorageBytes;
+    final receiverTotal = service.receiverTotalStorageBytes;
+    final showStorageLow = receiverFree != null &&
+        receiverFree > 0 &&
+        service.batchTotalBytes > 0 &&
+        receiverFree < service.batchTotalBytes;
 
     return Card(
       elevation: 2,
@@ -5739,7 +6210,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               isStorageFull
                                   ? 'PAUSED (RECEIVER FULL)'
                                   : (isSyncing
-                                      ? 'UPLOADING (${(service.overallBatchProgressRatio * 100).toInt()}%)'
+                                      ? 'SENDING (${(service.overallBatchProgressRatio * 100).toInt()}%)'
                                       : (isPaused
                                           ? 'PAUSED'
                                           : (isUpToDate
@@ -5765,7 +6236,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         isStorageFull
                             ? 'Receiver is out of storage. Transfer will auto-resume once space is cleared.'
                             : (isSyncing && service.currentSyncingFilename != null
-                                ? 'Uploading to ${targetPeer?.name ?? "Server"} • File ${service.currentSyncIndex} of ${service.pendingAssetsCount} (${service.currentSyncingFilename})'
+                                ? 'Sending to ${targetPeer?.name ?? "Server"}${targetPeer?.ip != null ? " (${targetPeer!.ip})" : ""} • File ${service.currentSyncIndex} of ${service.pendingAssetsCount} (${service.currentSyncingFilename})'
                                 : (isPaused
                                     ? 'Backup paused (${service.formattedBatchBytes}) • Tap "Resume Backup" to continue'
                                     : (service.totalDeviceAssets > 0
@@ -5887,6 +6358,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
+            // ── Receiver Storage Telemetry ──────────────────────────────────
+            if (receiverFree != null && receiverFree > 0) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: showStorageLow
+                      ? Colors.amber.withValues(alpha: 0.1)
+                      : (isDark
+                          ? GooglePhotosColors.green.withValues(alpha: 0.08)
+                          : GooglePhotosColors.green.withValues(alpha: 0.06)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: showStorageLow
+                        ? Colors.amber.shade600
+                        : GooglePhotosColors.green.withValues(alpha: 0.3),
+                    width: 0.8,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      showStorageLow ? Icons.warning_amber_rounded : Icons.storage_rounded,
+                      size: 14,
+                      color: showStorageLow ? Colors.amber.shade700 : GooglePhotosColors.green,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        showStorageLow
+                            ? '⚠️ Receiver storage low: ${(receiverFree / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB free for ${CameraBackupService.formatBytes(service.batchTotalBytes)} batch'
+                            : '💾 Receiver Storage: ${(receiverFree / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB free'
+                                '${receiverTotal != null && receiverTotal > 0 ? " of ${(receiverTotal / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB" : ""}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: showStorageLow ? FontWeight.w600 : FontWeight.normal,
+                          color: showStorageLow
+                              ? (isDark ? Colors.amber.shade200 : Colors.amber.shade900)
+                              : (isDark ? Colors.grey.shade400 : Colors.grey.shade700),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Row(
               children: [

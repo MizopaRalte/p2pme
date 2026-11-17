@@ -43,6 +43,10 @@ class CameraBackupService {
   bool _isServerStorageFull = false;
   String? _lastError;
 
+  // Receiver storage telemetry (populated via pre-flight /api/info probe)
+  int? _receiverFreeStorageBytes;
+  int? _receiverTotalStorageBytes;
+
   int _totalDeviceAssets = 0;
   int _pendingAssetsCount = 0;
   int _currentSyncIndex = 0;
@@ -59,6 +63,10 @@ class CameraBackupService {
   String? get currentSyncingFilename => _currentSyncingFilename;
   DateTime? get lastSyncTime => _lastSyncTime;
   String? get lastError => _lastError;
+
+  /// Receiver free storage in bytes – populated before first file of each batch
+  int? get receiverFreeStorageBytes => _receiverFreeStorageBytes;
+  int? get receiverTotalStorageBytes => _receiverTotalStorageBytes;
 
   VoidCallback? onNewAssetsDetected;
 
@@ -359,9 +367,29 @@ class CameraBackupService {
 
     _batchTotalBytes = pending.fold<int>(0, (sum, item) => sum + item.fileSize);
     _batchBytesSent = 0;
+    // Reset receiver storage telemetry for this new batch
+    _receiverFreeStorageBytes = null;
+    _receiverTotalStorageBytes = null;
 
     String activeHost = peerIp;
     int activePort = peerPort;
+
+    // Pre-flight: probe receiver's /api/info to get storage telemetry before first file
+    try {
+      final infoClient = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+      final infoReq = await infoClient.getUrl(Uri.parse('http://$peerIp:$peerPort/api/info'));
+      final infoResp = await infoReq.close();
+      if (infoResp.statusCode == HttpStatus.ok) {
+        final body = await utf8.decoder.bind(infoResp).join();
+        final infoJson = jsonDecode(body) as Map<String, dynamic>;
+        final storageMap = infoJson['storage'] as Map<String, dynamic>?;
+        _receiverFreeStorageBytes = (storageMap?['free_bytes'] as num?)?.toInt();
+        _receiverTotalStorageBytes = (storageMap?['total_bytes'] as num?)?.toInt();
+        debugPrint('[CameraBackup] Pre-flight: receiver free=$_receiverFreeStorageBytes bytes');
+      }
+    } catch (e) {
+      debugPrint('[CameraBackup] Pre-flight /api/info probe failed (non-fatal): $e');
+    }
 
     // Fast probe to verify if LAN peerIp is directly reachable. If not and wanHost is provided, switch to WAN
     if (wanHost != null && wanHost.isNotEmpty && wanHost != peerIp) {
@@ -478,6 +506,7 @@ class CameraBackupService {
             } else if (resp.statusCode == 507) {
               debugPrint('[CameraBackup] Receiver storage full (HTTP 507). Pausing and awaiting cleanup...');
               _isServerStorageFull = true;
+              _receiverFreeStorageBytes = 0;
               _state = CameraBackupState.serverStorageFull;
               _stateController.add(_state);
               _batchBytesSent = (_batchBytesSent - _currentFileBytesSent).clamp(0, _batchTotalBytes);
@@ -562,6 +591,9 @@ class CameraBackupService {
           final json = jsonDecode(body) as Map<String, dynamic>;
           final storage = json['storage'] as Map<String, dynamic>?;
           final freeBytes = (storage?['free_bytes'] as num?)?.toInt() ?? 0;
+          _receiverFreeStorageBytes = freeBytes;
+          _receiverTotalStorageBytes = (storage?['total_bytes'] as num?)?.toInt();
+          _stateController.add(_state);
           if (freeBytes > 200 * 1024 * 1024) { // At least 200 MB free
             debugPrint('[CameraBackup] Receiver storage freed ($freeBytes bytes available). Resuming sync!');
             return true;
