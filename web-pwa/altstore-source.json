@@ -37,6 +37,24 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.2.2",
+          "buildVersion": "16",
+          "date": "2026-11-17",
+          "localizedDescription": "Role selection screen, iOS server startup fix, receiver storage telemetry, peer IP clarity, and server hub controls",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.2.2.ipa",
+          "size": 7651044,
+          "sha256": "2c38a733c14f76874d4f88430fe0b3137fc02d99d2dca7042824c3fc5e649e30",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.2.1",
           "buildVersion": "15",
           "date": "2026-11-16",
