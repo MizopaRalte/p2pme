@@ -26,6 +26,7 @@ class P2PmeSyncService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -77,8 +78,12 @@ class P2PmeSyncService : Service() {
             wifiLock = wifiManager?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "P2Pme::WifiLock")?.apply {
                 acquire()
             }
+            multicastLock = wifiManager?.createMulticastLock("P2Pme::MulticastLock")?.apply {
+                setReferenceCounted(true)
+                acquire()
+            }
         } catch (e: Exception) {
-            // Ignore if wifi lock cannot be acquired
+            // Ignore if wifi or multicast lock cannot be acquired
         }
 
         return START_STICKY
@@ -103,6 +108,15 @@ class P2PmeSyncService : Service() {
             // Ignore
         }
         wifiLock = null
+
+        try {
+            multicastLock?.let {
+                if (it.isHeld) it.release()
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        multicastLock = null
 
         super.onDestroy()
     }

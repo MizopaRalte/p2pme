@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'global_hub_discovery.dart';
 
 class CameraAssetItem {
   final String id;
@@ -413,6 +414,23 @@ class CameraBackupService {
       }
     } catch (_) {
       lanReachable = false;
+    }
+
+    // Zero-Config Global WAN Fallback: If LAN unreachable and no manual wanHost, resolve via Cloudflare Tracker
+    if (!lanReachable && (wanHost == null || wanHost.isEmpty) && token.isNotEmpty) {
+      if (!wifiOnly || isUsbConnected) {
+        debugPrint('[CameraBackup] LAN unreachable. Attempting zero-config Global Tracker resolution...');
+        try {
+          final resolved = await GlobalHubDiscovery.resolveHub(secretKeyOrToken: token);
+          if (resolved != null) {
+            wanHost = resolved.publicIp;
+            wanPort = resolved.publicPort;
+            debugPrint('[CameraBackup] Global Tracker resolved hub to: $wanHost:$wanPort');
+          }
+        } catch (e) {
+          debugPrint('[CameraBackup] Global Tracker resolution failed: $e');
+        }
+      }
     }
 
     // If LAN peer is unreachable and wanHost is provided, switch to WAN endpoint

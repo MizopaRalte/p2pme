@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'services/p2p_bridge.dart';
 import 'services/camera_backup_service.dart';
+import 'services/global_hub_discovery.dart';
 import 'screens/qr_scanner_screen.dart';
 
 void main() {
@@ -327,10 +328,10 @@ class SyncFolderItem {
 class NearbyPeer {
   final String id;
   final String name;
-  final String ip;
-  final int port;
+  String ip;
+  int port;
   final String deviceType; // 'pc', 'android', 'ios', 'web'
-  final DateTime lastSeen;
+  DateTime lastSeen;
   final List<String> folders;
   bool isPaired;
   String? authToken; // paired secret or token
@@ -338,6 +339,8 @@ class NearbyPeer {
   int? wanPort;
   int? freeStorageBytes;
   int? totalStorageBytes;
+
+  String? get wanUrl => wanHost != null && wanHost!.isNotEmpty ? 'http://$wanHost:${wanPort ?? port}' : null;
 
   NearbyPeer({
     required this.id,
@@ -354,6 +357,36 @@ class NearbyPeer {
     this.freeStorageBytes,
     this.totalStorageBytes,
   });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'ip': ip,
+    'port': port,
+    'deviceType': deviceType,
+    'lastSeen': lastSeen.toIso8601String(),
+    'isPaired': isPaired,
+    'authToken': authToken,
+    'wanHost': wanHost,
+    'wanPort': wanPort,
+    'freeStorageBytes': freeStorageBytes,
+    'totalStorageBytes': totalStorageBytes,
+  };
+
+  factory NearbyPeer.fromJson(Map<String, dynamic> json) => NearbyPeer(
+    id: json['id']?.toString() ?? '',
+    name: json['name']?.toString() ?? 'Nearby Device',
+    ip: json['ip']?.toString() ?? '',
+    port: (json['port'] as num?)?.toInt() ?? 45455,
+    deviceType: json['deviceType']?.toString() ?? 'pc',
+    lastSeen: json['lastSeen'] != null ? DateTime.tryParse(json['lastSeen'].toString()) ?? DateTime.now() : DateTime.now(),
+    isPaired: json['isPaired'] == true || (json['authToken'] != null && json['authToken'].toString().isNotEmpty),
+    authToken: json['authToken']?.toString(),
+    wanHost: json['wanHost']?.toString(),
+    wanPort: (json['wanPort'] as num?)?.toInt(),
+    freeStorageBytes: (json['freeStorageBytes'] as num?)?.toInt(),
+    totalStorageBytes: (json['totalStorageBytes'] as num?)?.toInt(),
+  );
 }
 
 // ==========================================
@@ -637,6 +670,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             );
             if (_selectedRole == AppRole.receiver || _selectedRole == AppRole.server) {
               _startWebDropServer();
+              if (Platform.isAndroid) {
+                _bgChannel.invokeMethod('startService').catchError((_) {});
+              }
+            } else if (_selectedRole == AppRole.sender) {
+              _initLocalIp().then((_) => _probeAllSavedServers());
             }
           }
           if (json.containsKey('folders') && json['folders'] is List) {
@@ -851,11 +889,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _nearbyScanTimer;
   Timer? _initialScanTimer;
   final List<NearbyPeer> _nearbyPeers = [];
+  final List<NearbyPeer> _connectedServers = [];
   NearbyPeer? _savedPairedServer;
+  final Set<String> _reconnectingServerIds = {};
   String? _serverRemoteWanUrl;
   String? _usbCableIp;
   bool _isUsbCableConnected = false;
   bool _isScanningNearby = false;
+  String? _globalWanStatus;
+  bool _isGlobalWanActive = false;
 
   // App Update Checker
   int _currentVersionCode = 16;
@@ -874,6 +916,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      _initLocalIp();
+      _probeAllSavedServers();
       final now = DateTime.now();
       // Silently check if resuming after 30+ minutes
       if (_lastUpdateCheckTime == null || now.difference(_lastUpdateCheckTime!).inMinutes >= 30) {
@@ -1159,6 +1203,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _loadAppConfig(); // loads _selectedRole and _rememberRole from disk
     _initDeviceName();
+    _initLocalIp();
     _checkLocalStorageSpace();
     _webDropSessionToken = _generateSessionToken();
     _initHubSecret();
@@ -1168,19 +1213,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // NOTE: _startWebDropServer() is now ONLY called when the user picks
     // AppRole.receiver or AppRole.server in the role-selection screen.
     // AppRole.sender keeps the HTTP server completely OFF.
-    _startNearbyBeacon();
-    _loadPairedServer();
-    CameraBackupService.instance.onNewAssetsDetected = () {
-      if (mounted) {
-        setState(() {});
-        _triggerAutoCameraBackup();
-      }
-    };
-    CameraBackupService.instance.scanCameraRoll().then((_) {
-      if (mounted) setState(() {});
-    });
-    _checkForAppUpdates();
-    _startPeriodicUpdateChecks();
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      _startNearbyBeacon();
+      _loadConnectedServers();
+      _checkForAppUpdates();
+      _startPeriodicUpdateChecks();
+    } else {
+      _loadConnectedServers();
+    }
   }
 
   @override
@@ -1286,14 +1326,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _scanNearby() async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) return;
     if (_isScanningNearby) return;
     if (mounted) {
       setState(() => _isScanningNearby = true);
     }
 
+    await _initLocalIp();
     _broadcastSelfBeacon();
 
     try {
+      final client = HttpClient()..connectionTimeout = const Duration(milliseconds: 600);
+
+      // 1. Always probe all saved/connected servers directly
+      for (final server in List<NearbyPeer>.from(_connectedServers)) {
+        await _probeIp(
+          client,
+          server.ip,
+          targetPort: server.port,
+          authToken: server.authToken,
+          wanHost: server.wanHost,
+          wanPort: server.wanPort,
+        );
+        if (server.wanHost != null && server.wanHost!.isNotEmpty && server.wanHost != server.ip) {
+          await _probeIp(
+            client,
+            server.wanHost!,
+            targetPort: server.wanPort ?? server.port,
+            authToken: server.authToken,
+            wanHost: server.wanHost,
+            wanPort: server.wanPort,
+          );
+        }
+      }
+
+      // 2. Scan local subnet if Wi-Fi/LAN IP is active
       if (_localIpAddress != null && _localIpAddress!.contains('.')) {
         final parts = _localIpAddress!.split('.');
         if (parts.length == 4) {
@@ -1307,12 +1374,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (adj > 0 && adj < 255) targetSet.add(adj);
           }
           final targetList = targetSet.toList();
-          final client = HttpClient()..connectionTimeout = const Duration(milliseconds: 350);
+          final subnetClient = HttpClient()..connectionTimeout = const Duration(milliseconds: 350);
 
           await Future.wait(
             targetList.where((i) => i != myLast).map((i) async {
               final targetIp = '$prefix.$i';
-              await _probeIp(client, targetIp);
+              await _probeIp(subnetClient, targetIp);
             }),
           );
         }
@@ -1346,36 +1413,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             final existingToken = idx >= 0 ? _nearbyPeers[idx].authToken : null;
             final existingWanHost = idx >= 0 ? _nearbyPeers[idx].wanHost : null;
             final existingWanPort = idx >= 0 ? _nearbyPeers[idx].wanPort : null;
-            final effectiveToken = (authToken != null && authToken.isNotEmpty) ? authToken : existingToken;
+
+            // Check if this matches a saved server in _connectedServers
+            final savedServer = _connectedServers.cast<NearbyPeer?>().firstWhere(
+              (s) => s != null && (s.id == id || s.ip == targetIp || (s.wanHost != null && s.wanHost == targetIp)),
+              orElse: () => null,
+            );
+
+            final effectiveToken = (authToken != null && authToken.isNotEmpty)
+                ? authToken
+                : (existingToken ?? savedServer?.authToken);
+
+            final effectiveName = (name != 'Nearby Device' && name.isNotEmpty)
+                ? name
+                : (savedServer?.name ?? name);
+
             final peer = NearbyPeer(
               id: id,
-              name: name,
+              name: effectiveName,
               ip: targetIp,
               port: port,
               deviceType: type,
               lastSeen: DateTime.now(),
               authToken: effectiveToken,
               isPaired: effectiveToken != null && effectiveToken.isNotEmpty,
-              wanHost: wanHost ?? existingWanHost,
-              wanPort: wanPort ?? existingWanPort,
+              wanHost: wanHost ?? existingWanHost ?? savedServer?.wanHost,
+              wanPort: wanPort ?? existingWanPort ?? savedServer?.wanPort,
               freeStorageBytes: freeStorageBytes,
               totalStorageBytes: totalStorageBytes,
             );
+
             setState(() {
               if (idx >= 0) {
                 _nearbyPeers[idx] = peer;
               } else {
                 _nearbyPeers.add(peer);
               }
+
+              if (savedServer != null) {
+                savedServer.ip = targetIp;
+                savedServer.lastSeen = DateTime.now();
+                savedServer.freeStorageBytes = freeStorageBytes;
+                savedServer.totalStorageBytes = totalStorageBytes;
+                if (peer.isPaired) savedServer.isPaired = true;
+                if (peer.authToken != null) savedServer.authToken = peer.authToken;
+              }
+
               if (peer.isPaired) {
-                _savedPairedServer = peer;
+                if (_savedPairedServer == null || _savedPairedServer!.id == id || _savedPairedServer!.ip == targetIp) {
+                  _savedPairedServer = peer;
+                }
               } else if (_savedPairedServer != null && (_savedPairedServer!.ip == targetIp || _savedPairedServer!.id == id)) {
                 _savedPairedServer!.freeStorageBytes = freeStorageBytes;
                 _savedPairedServer!.totalStorageBytes = totalStorageBytes;
               }
             });
+
             if (peer.isPaired) {
               _savePairedServer(peer);
+            } else if (savedServer != null) {
+              _persistConnectedServers();
             }
             _triggerAutoCameraBackup();
           }
@@ -1500,44 +1597,74 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _savePairedServer(NearbyPeer peer) async {
     try {
-      final baseDir = _getAppBaseDirectory();
-      final file = File('$baseDir${Platform.pathSeparator}.paired_server');
-      final data = jsonEncode({
-        'id': peer.id,
-        'name': peer.name,
-        'ip': peer.ip,
-        'port': peer.port,
-        'deviceType': peer.deviceType,
-        'authToken': peer.authToken,
-        'isPaired': peer.isPaired,
-        'wanHost': peer.wanHost,
-        'wanPort': peer.wanPort,
-      });
-      await file.parent.create(recursive: true);
-      await file.writeAsString(data);
-      if (mounted) {
-        setState(() => _savedPairedServer = peer);
+      peer.isPaired = true;
+      peer.lastSeen = DateTime.now();
+
+      final existingIdx = _connectedServers.indexWhere((s) => s.id == peer.id || s.ip == peer.ip);
+      if (existingIdx >= 0) {
+        _connectedServers[existingIdx] = peer;
+      } else {
+        _connectedServers.add(peer);
       }
+
+      final peerIdx = _nearbyPeers.indexWhere((p) => p.id == peer.id || p.ip == peer.ip);
+      if (peerIdx >= 0) {
+        _nearbyPeers[peerIdx] = peer;
+      } else {
+        _nearbyPeers.add(peer);
+      }
+
+      _savedPairedServer = peer;
+      await _persistConnectedServers();
+      if (mounted) setState(() {});
     } catch (e) {
       debugPrint('Failed to save paired server: $e');
     }
   }
 
-  Future<void> _unpairServer() async {
+  Future<void> _persistConnectedServers() async {
     try {
       final baseDir = _getAppBaseDirectory();
-      final file = File('$baseDir${Platform.pathSeparator}.paired_server');
-      if (await file.exists()) {
-        await file.delete();
+      final file = File('$baseDir${Platform.pathSeparator}.connected_servers.json');
+      final listJson = jsonEncode(_connectedServers.map((s) => s.toJson()).toList());
+      await file.parent.create(recursive: true);
+      await file.writeAsString(listJson);
+
+      // Keep legacy .paired_server in sync for backwards compatibility
+      if (_savedPairedServer != null) {
+        final legacyFile = File('$baseDir${Platform.pathSeparator}.paired_server');
+        await legacyFile.writeAsString(jsonEncode(_savedPairedServer!.toJson()));
       }
+    } catch (e) {
+      debugPrint('Failed to persist connected servers: $e');
+    }
+  }
+
+  Future<void> _unpairServer([NearbyPeer? serverToRemove]) async {
+    try {
+      final target = serverToRemove ?? _savedPairedServer;
+      if (target == null) return;
+
+      _connectedServers.removeWhere((s) => s.id == target.id || s.ip == target.ip);
+      _nearbyPeers.removeWhere((p) => p.id == target.id || p.ip == target.ip);
+
+      if (_savedPairedServer?.id == target.id || _savedPairedServer?.ip == target.ip) {
+        _savedPairedServer = _connectedServers.isNotEmpty ? _connectedServers.first : null;
+      }
+
+      await _persistConnectedServers();
+
+      if (_connectedServers.isEmpty) {
+        final baseDir = _getAppBaseDirectory();
+        final legacyFile = File('$baseDir${Platform.pathSeparator}.paired_server');
+        if (await legacyFile.exists()) await legacyFile.delete();
+      }
+
       if (mounted) {
-        setState(() {
-          _savedPairedServer = null;
-          _nearbyPeers.removeWhere((p) => p.isPaired);
-        });
+        setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unpaired from server.'),
+          SnackBar(
+            content: Text('Unpaired from ${target.name}.'),
             backgroundColor: GooglePhotosColors.blue,
           ),
         );
@@ -1545,6 +1672,319 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('Failed to unpair server: $e');
     }
+  }
+
+  Future<void> _loadConnectedServers() async {
+    try {
+      final baseDir = _getAppBaseDirectory();
+      final file = File('$baseDir${Platform.pathSeparator}.connected_servers.json');
+      if (await file.exists()) {
+        final content = (await file.readAsString()).trim();
+        if (content.isNotEmpty) {
+          final list = jsonDecode(content) as List<dynamic>;
+          _connectedServers.clear();
+          for (final item in list) {
+            if (item is Map<String, dynamic>) {
+              final peer = NearbyPeer.fromJson(item);
+              if (peer.ip.isNotEmpty) {
+                _connectedServers.add(peer);
+                final idx = _nearbyPeers.indexWhere((p) => p.id == peer.id || p.ip == peer.ip);
+                if (idx >= 0) {
+                  _nearbyPeers[idx] = peer;
+                } else {
+                  _nearbyPeers.add(peer);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // If .connected_servers.json was empty, load from legacy .paired_server
+      if (_connectedServers.isEmpty) {
+        final legacyFile = File('$baseDir${Platform.pathSeparator}.paired_server');
+        if (await legacyFile.exists()) {
+          final content = (await legacyFile.readAsString()).trim();
+          if (content.isNotEmpty) {
+            final map = jsonDecode(content) as Map<String, dynamic>;
+            final legacyPeer = NearbyPeer.fromJson(map);
+            if (legacyPeer.ip.isNotEmpty) {
+              _connectedServers.add(legacyPeer);
+              final idx = _nearbyPeers.indexWhere((p) => p.id == legacyPeer.id || p.ip == legacyPeer.ip);
+              if (idx >= 0) {
+                _nearbyPeers[idx] = legacyPeer;
+              } else {
+                _nearbyPeers.add(legacyPeer);
+              }
+              await _persistConnectedServers();
+            }
+          }
+        }
+      }
+
+      if (_connectedServers.isNotEmpty) {
+        _savedPairedServer = _connectedServers.first;
+      }
+
+      if (mounted) setState(() {});
+      if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+        _probeAllSavedServers();
+      }
+    } catch (e) {
+      debugPrint('Failed to load connected servers: $e');
+    }
+  }
+
+  Future<void> _probeAllSavedServers() async {
+    if (_connectedServers.isEmpty) return;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    for (final server in List<NearbyPeer>.from(_connectedServers)) {
+      final success = await _probeIp(
+        client,
+        server.ip,
+        targetPort: server.port,
+        authToken: server.authToken,
+        wanHost: server.wanHost,
+        wanPort: server.wanPort,
+      );
+      if (!success && server.wanHost != null && server.wanHost!.isNotEmpty && server.wanHost != server.ip) {
+        await _probeIp(
+          client,
+          server.wanHost!,
+          targetPort: server.wanPort ?? server.port,
+          authToken: server.authToken,
+          wanHost: server.wanHost,
+          wanPort: server.wanPort,
+        );
+      }
+      CameraBackupService.instance.probeReceiverStorage(server.ip, server.port);
+    }
+  }
+
+  Future<bool> _reconnectServer(NearbyPeer server) async {
+    if (_reconnectingServerIds.contains(server.id)) return false;
+    setState(() => _reconnectingServerIds.add(server.id));
+
+    try {
+      await _initLocalIp();
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+
+      // Phase 1: Direct probe to last known IP
+      debugPrint('[Reconnect] Probing last known IP ${server.ip}:${server.port} for ${server.name}...');
+      bool success = await _probeIp(
+        client,
+        server.ip,
+        targetPort: server.port,
+        authToken: server.authToken,
+        wanHost: server.wanHost,
+        wanPort: server.wanPort,
+      );
+
+      // Phase 2: If failed and on a LAN, sweep local subnet to re-find server
+      if (!success && _localIpAddress != null && _localIpAddress!.contains('.')) {
+        final parts = _localIpAddress!.split('.');
+        if (parts.length == 4) {
+          final prefix = '${parts[0]}.${parts[1]}.${parts[2]}';
+          final myLast = int.tryParse(parts[3]) ?? 0;
+          debugPrint('[Reconnect] Server not at ${server.ip}. Sweeping subnet $prefix.0/24 for ${server.name}...');
+
+          final candidates = <int>{1, 2, 3, 4, 10, 20, 26, 30, 35, 50, 60, 100, 101, 150, 200};
+          for (int delta = -10; delta <= 10; delta++) {
+            final adj = myLast + delta;
+            if (adj > 0 && adj < 255) candidates.add(adj);
+          }
+          for (int i = 1; i < 255; i++) {
+            candidates.add(i);
+          }
+
+          final candidateList = candidates.where((i) => i != myLast).toList();
+          final sweepClient = HttpClient()..connectionTimeout = const Duration(milliseconds: 350);
+
+          const batchSize = 25;
+          for (int b = 0; b < candidateList.length; b += batchSize) {
+            final batch = candidateList.sublist(b, (b + batchSize).clamp(0, candidateList.length));
+            final results = await Future.wait(
+              batch.map((lastOctet) async {
+                final targetIp = '$prefix.$lastOctet';
+                return await _probeAndMatchServer(sweepClient, targetIp, server);
+              }),
+            );
+            if (results.any((r) => r == true)) {
+              success = true;
+              break;
+            }
+          }
+        }
+      }
+
+      // Phase 3: If LAN failed, try WAN / Mesh host if available
+      if (!success && server.wanHost != null && server.wanHost!.isNotEmpty && server.wanHost != server.ip) {
+        debugPrint('[Reconnect] Probing remote WAN endpoint ${server.wanHost}:${server.wanPort ?? server.port}...');
+        success = await _probeIp(
+          client,
+          server.wanHost!,
+          targetPort: server.wanPort ?? server.port,
+          authToken: server.authToken,
+          wanHost: server.wanHost,
+          wanPort: server.wanPort,
+        );
+      }
+
+      // Phase 4: Zero-Config Global Cloudflare Tracker Resolution (Resilio Sync Style)
+      if (!success && server.authToken != null && server.authToken!.isNotEmpty) {
+        debugPrint('[Reconnect] Resolving ${server.name} via Cloudflare Global Tracker...');
+        try {
+          final resolved = await GlobalHubDiscovery.resolveHub(secretKeyOrToken: server.authToken!);
+          if (resolved != null) {
+            debugPrint('[Reconnect] Discovered ${server.name} via Global Tracker: ${resolved.publicIp}:${resolved.publicPort}');
+            success = await _probeIp(
+              client,
+              resolved.publicIp,
+              targetPort: resolved.publicPort,
+              authToken: server.authToken,
+              wanHost: resolved.publicIp,
+              wanPort: resolved.publicPort,
+            );
+            if (success) {
+              server.ip = resolved.publicIp;
+              server.port = resolved.publicPort;
+              server.wanHost = resolved.publicIp;
+              server.wanPort = resolved.publicPort;
+              server.lastSeen = DateTime.now();
+              await _persistConnectedServers();
+            }
+          }
+        } catch (e) {
+          debugPrint('[Reconnect] Global Tracker resolution error: $e');
+        }
+      }
+
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✓ Connected to ${server.name} (${server.ip})'),
+              backgroundColor: GooglePhotosColors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not reach ${server.name} (${server.ip}). Make sure Server Hub is active on receiver phone.'),
+              backgroundColor: GooglePhotosColors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+      return success;
+    } finally {
+      if (mounted) {
+        setState(() => _reconnectingServerIds.remove(server.id));
+      }
+    }
+  }
+
+  Future<bool> _probeAndMatchServer(HttpClient client, String targetIp, NearbyPeer server) async {
+    try {
+      final req = await client.getUrl(Uri.parse('http://$targetIp:${server.port}/api/info'));
+      final resp = await req.close();
+      if (resp.statusCode == HttpStatus.ok) {
+        final body = await utf8.decoder.bind(resp).join();
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        if (json['p2pme'] == true) {
+          final id = json['node_id']?.toString() ?? '';
+          final name = json['device_name']?.toString() ?? '';
+          if (id == server.id || name == server.name || server.id.isEmpty) {
+            debugPrint('[Reconnect] Found server ${server.name} at new IP: $targetIp!');
+            server.ip = targetIp;
+            server.lastSeen = DateTime.now();
+            final storageMap = json['storage'] as Map<String, dynamic>?;
+            server.freeStorageBytes = (storageMap?['free_bytes'] as num?)?.toInt();
+            server.totalStorageBytes = (storageMap?['total_bytes'] as num?)?.toInt();
+
+            final cIdx = _connectedServers.indexWhere((s) => s.id == server.id);
+            if (cIdx >= 0) _connectedServers[cIdx] = server;
+            final pIdx = _nearbyPeers.indexWhere((p) => p.id == server.id || p.ip == targetIp);
+            if (pIdx >= 0) {
+              _nearbyPeers[pIdx] = server;
+            } else {
+              _nearbyPeers.add(server);
+            }
+            if (_savedPairedServer?.id == server.id) {
+              _savedPairedServer = server;
+            }
+            await _persistConnectedServers();
+            if (mounted) setState(() {});
+            return true;
+          }
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  void _showEditServerWanDialog(NearbyPeer server) {
+    final controller = TextEditingController(text: server.wanHost ?? '');
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
+        title: Row(
+          children: [
+            const Icon(Icons.public_rounded, color: GooglePhotosColors.blue),
+            const SizedBox(width: 10),
+            Expanded(child: Text('Remote WAN for ${server.name}', style: const TextStyle(fontSize: 16))),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter the Tailscale IP, DDNS domain, or public IP:port to connect to this server outside home Wi-Fi:',
+              style: TextStyle(fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                labelText: 'Remote Host / Domain',
+                hintText: 'e.g. 100.x.y.z or myserver.ts.net',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: GooglePhotosColors.blue),
+            onPressed: () async {
+              final text = controller.text.trim();
+              Navigator.pop(ctx);
+              server.wanHost = text.isEmpty ? null : text;
+              await _persistConnectedServers();
+              if (mounted) {
+                setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(text.isEmpty ? 'Cleared WAN URL.' : 'Remote WAN URL updated for ${server.name}.'),
+                    backgroundColor: GooglePhotosColors.blue,
+                  ),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _initServerWanUrl() async {
@@ -1574,54 +2014,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() => _serverRemoteWanUrl = url.trim().isEmpty ? null : url.trim());
       }
     } catch (_) {}
-  }
-
-  Future<void> _loadPairedServer() async {
-    try {
-      final baseDir = _getAppBaseDirectory();
-      final file = File('$baseDir${Platform.pathSeparator}.paired_server');
-      if (await file.exists()) {
-        final content = (await file.readAsString()).trim();
-        if (content.isNotEmpty) {
-          final map = jsonDecode(content) as Map<String, dynamic>;
-          final ip = map['ip'] as String?;
-          final port = map['port'] as int? ?? _webDropPort;
-          final authToken = map['authToken'] as String?;
-          final name = map['name'] as String? ?? 'Home Backup Hub';
-          final deviceType = map['deviceType'] as String? ?? 'pc';
-          final id = map['id'] as String? ?? (ip ?? 'server');
-          final wanHost = map['wanHost'] as String?;
-          final wanPort = map['wanPort'] as int?;
-
-          if (ip != null && ip.isNotEmpty) {
-            final loadedPeer = NearbyPeer(
-              id: id,
-              name: name,
-              ip: ip,
-              port: port,
-              deviceType: deviceType,
-              lastSeen: DateTime.now(),
-              authToken: authToken,
-              isPaired: true,
-              wanHost: wanHost,
-              wanPort: wanPort,
-            );
-            if (mounted) {
-              setState(() => _savedPairedServer = loadedPeer);
-            }
-
-            final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
-            final lanSuccess = await _probeIp(client, ip, targetPort: port, authToken: authToken, wanHost: wanHost, wanPort: wanPort);
-            if (!lanSuccess && wanHost != null && wanHost.isNotEmpty && wanHost != ip) {
-              await _probeIp(client, wanHost, targetPort: wanPort ?? port, authToken: authToken, wanHost: wanHost, wanPort: wanPort);
-            }
-            CameraBackupService.instance.probeReceiverStorage(ip, port);
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Failed to load paired server: $e');
-    }
   }
 
   Future<void> _openQrScanner({String? title, String? prompt}) async {
@@ -2119,6 +2511,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _serverBindError = null;
       });
       server.listen(_handleWebDropRequest);
+
+      // Automated UPnP Port Mapping & Global Cloudflare Edge Announcement
+      if (!Platform.environment.containsKey('FLUTTER_TEST') && _hubSecretKey != null && _localIpAddress != null) {
+        GlobalHubDiscovery.startAnnouncement(
+          secretKey: _hubSecretKey!,
+          localIp: _localIpAddress!,
+          port: _webDropPort,
+          deviceName: _myDeviceName,
+        ).then((state) {
+          if (mounted) {
+            setState(() {
+              _globalWanStatus = state.statusSummary;
+              _isGlobalWanActive = state.isAnnounced && (state.isUpnpActive || state.publicIp != null);
+            });
+          }
+        });
+      }
     } catch (e) {
       debugPrint('Failed to start WebDrop HTTP server: $e');
       if (mounted) {
@@ -2134,6 +2543,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _webDropServer?.close(force: true);
     _webDropServer = null;
     _isWebDropServerRunning = false;
+    GlobalHubDiscovery.stopAnnouncement(port: _webDropPort);
+    _globalWanStatus = null;
+    _isGlobalWanActive = false;
     if (mounted) {
       setState(() {});
     }
@@ -2449,6 +2861,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (_isWebDropServerRunning) {
         await _stopWebDropServer();
       }
+      if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+        _initLocalIp().then((_) {
+          _probeAllSavedServers();
+        }).catchError((_) {});
+      }
       // Pre-flight probe target server storage so sender immediately sees available space
       final target = _savedPairedServer?.isPaired == true
           ? _savedPairedServer
@@ -2470,6 +2887,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Receiver / Server: HTTP server must be ON
       if (!_isWebDropServerRunning) {
         await _startWebDropServer();
+      }
+      // Ensure Android foreground service is active for 24/7 background listening
+      if (Platform.isAndroid) {
+        try {
+          await _bgChannel.invokeMethod('startService');
+          setState(() => _backgroundSyncEnabled = true);
+        } catch (_) {}
       }
       // Proactively check and prompt for storage permission if needed on Android 11+
       _checkAndPromptAllFilesAccess();
@@ -4651,6 +5075,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF12B5CB)),
                     ),
                   ],
+                  // Live Zero-Config Global WAN Status Badge (UPnP / STUN / Cloudflare Tracker)
+                  if (_globalWanStatus != null) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _isGlobalWanActive
+                            ? GooglePhotosColors.green.withValues(alpha: 0.12)
+                            : GooglePhotosColors.blue.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: _isGlobalWanActive
+                              ? GooglePhotosColors.green.withValues(alpha: 0.3)
+                              : GooglePhotosColors.blue.withValues(alpha: 0.3),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.public_rounded,
+                            color: _isGlobalWanActive ? GooglePhotosColors.green : GooglePhotosColors.blue,
+                            size: 13,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _globalWanStatus!,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: _isGlobalWanActive ? GooglePhotosColors.green : GooglePhotosColors.blue,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 4),
                   Text(
                     'Hub Secret Key: ${_hubSecretKey != null ? "${_hubSecretKey!.substring(0, 12)}••••••••" : "Generating..."}',
@@ -5404,13 +5869,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
         const SizedBox(height: 16),
 
+        // Saved / Connected Servers Section (Always Visible for Sender Reconnect & Quick Beam)
+        if (_connectedServers.isNotEmpty) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Flexible(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.dns_rounded, size: 16, color: GooglePhotosColors.blue),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'Connected Servers (${_connectedServers.length})',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                ),
+                onPressed: _probeAllSavedServers,
+                icon: const Icon(Icons.refresh_rounded, size: 14),
+                label: const Text('Ping All', style: TextStyle(fontSize: 11)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ..._connectedServers.map((server) => _buildConnectedServerSenderCard(server)),
+          const SizedBox(height: 12),
+        ],
+
         // Nearby Direct Beam
-        if (_nearbyPeers.isNotEmpty) ...[
+        if (_nearbyPeers.where((p) => !_connectedServers.any((s) => s.id == p.id || s.ip == p.ip)).isNotEmpty) ...[
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Nearby on Wi-Fi (${_nearbyPeers.length})',
+                'Other Nearby on Wi-Fi (${_nearbyPeers.where((p) => !_connectedServers.any((s) => s.id == p.id || s.ip == p.ip)).length})',
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
               ),
               TextButton.icon(
@@ -5422,7 +5924,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           const SizedBox(height: 6),
-          ..._nearbyPeers.map((peer) {
+          ..._nearbyPeers.where((p) => !_connectedServers.any((s) => s.id == p.id || s.ip == p.ip)).map((peer) {
             final isDark = Theme.of(context).brightness == Brightness.dark;
             final isPc = peer.deviceType.toLowerCase().contains('pc') || peer.deviceType.toLowerCase().contains('windows');
             return Card(
@@ -6270,21 +6772,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (isPaired) ...[
                   IconButton.outlined(
                     tooltip: 'Reconnect / Ping Server',
-                    icon: const Icon(Icons.refresh_rounded, size: 20),
+                    icon: _reconnectingServerIds.contains(displayPeer.id)
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_rounded, size: 20),
                     style: IconButton.styleFrom(
                       foregroundColor: GooglePhotosColors.blue,
                       side: BorderSide(color: GooglePhotosColors.blue.withValues(alpha: 0.5)),
                       padding: const EdgeInsets.all(12),
                       minimumSize: const Size(48, 48),
                     ),
-                    onPressed: () async {
-                      final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
-                      await _probeIp(client, serverIp, targetPort: serverPort, authToken: displayPeer.authToken, wanHost: wanHost);
-                      if (wanHost != null && wanHost.isNotEmpty) {
-                        await _probeIp(client, wanHost, targetPort: displayPeer.wanPort ?? serverPort, authToken: displayPeer.authToken, wanHost: wanHost);
-                      }
-                      if (mounted) setState(() {});
-                    },
+                    onPressed: _reconnectingServerIds.contains(displayPeer.id)
+                        ? null
+                        : () => _reconnectServer(displayPeer),
                   ),
                   const SizedBox(width: 6),
                   PopupMenuButton<String>(
@@ -6293,8 +6796,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onSelected: (val) {
                       if (val == 'change') {
                         _showConnectServerModal();
+                      } else if (val == 'wan') {
+                        _showEditServerWanDialog(displayPeer);
                       } else if (val == 'unpair') {
-                        _promptUnpairServer();
+                        _promptUnpairServer(displayPeer);
                       }
                     },
                     itemBuilder: (ctx) => [
@@ -6304,7 +6809,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           children: [
                             Icon(Icons.swap_horiz, size: 16),
                             SizedBox(width: 8),
-                            Text('Change Server', style: TextStyle(fontSize: 12)),
+                            Text('Switch / Add Hub', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'wan',
+                        child: Row(
+                          children: [
+                            Icon(Icons.public, size: 16),
+                            SizedBox(width: 8),
+                            Text('Set Remote WAN URL', style: TextStyle(fontSize: 12)),
                           ],
                         ),
                       ),
@@ -6353,23 +6868,237 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _promptUnpairServer() {
+  Widget _buildConnectedServerSenderCard(NearbyPeer server) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isReconnecting = _reconnectingServerIds.contains(server.id);
+    final isLive = _nearbyPeers.any((p) => (p.id == server.id || p.ip == server.ip) && (p.authToken != null || p.isPaired));
+    final isPc = server.deviceType.toLowerCase().contains('pc') || server.deviceType.toLowerCase().contains('windows');
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      color: isDark ? const Color(0xFF202124) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: isLive
+              ? GooglePhotosColors.green.withValues(alpha: 0.5)
+              : (isDark ? const Color(0xFF3C4043) : const Color(0xFFE8EAED)),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: isLive
+                      ? GooglePhotosColors.green.withValues(alpha: 0.15)
+                      : (isDark ? const Color(0xFF303134) : Colors.grey.shade100),
+                  child: Icon(
+                    isPc ? Icons.laptop_chromebook : Icons.phone_android,
+                    color: isLive ? GooglePhotosColors.green : Colors.grey,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              server.name,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: GooglePhotosColors.blue.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'PAIRED',
+                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: GooglePhotosColors.blue),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isLive ? GooglePhotosColors.green : const Color(0xFFF9AB00),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              isLive
+                                  ? 'Online • ${server.ip}:${server.port}${server.freeStorageBytes != null && server.freeStorageBytes! > 0 ? " • ${(server.freeStorageBytes! / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB Free" : ""}'
+                                  : 'Offline • Last seen ${_formatLastSeen(server.lastSeen)} • ${server.ip}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isDark ? const Color(0xFF9AA0A6) : const Color(0xFF5F6368),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (server.wanHost != null && server.wanHost!.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          '🌐 WAN: ${server.wanHost}',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isDark ? const Color(0xFF8AB4F8) : GooglePhotosColors.blue,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_selectedFilePaths.isNotEmpty) ...[
+                      FilledButton.tonal(
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                          minimumSize: const Size(0, 32),
+                        ),
+                        onPressed: () => _handleDirectDropToPeer(server),
+                        child: const Text('Send Here', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    IconButton(
+                      tooltip: 'Reconnect / Ping',
+                      icon: isReconnecting
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh_rounded, size: 18),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: isReconnecting ? null : () => _reconnectServer(server),
+                    ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, size: 18),
+                      onSelected: (val) {
+                        if (val == 'reconnect') {
+                          _reconnectServer(server);
+                        } else if (val == 'wan') {
+                          _showEditServerWanDialog(server);
+                        } else if (val == 'set_primary') {
+                          setState(() => _savedPairedServer = server);
+                          _persistConnectedServers();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('${server.name} set as primary backup hub.'),
+                              backgroundColor: GooglePhotosColors.blue,
+                            ),
+                          );
+                        } else if (val == 'unpair') {
+                          _promptUnpairServer(server);
+                        }
+                      },
+                      itemBuilder: (ctx) => [
+                        const PopupMenuItem(
+                          value: 'reconnect',
+                          child: Row(
+                            children: [
+                              Icon(Icons.refresh, size: 16),
+                              SizedBox(width: 8),
+                              Text('Ping / Reconnect'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'wan',
+                          child: Row(
+                            children: [
+                              Icon(Icons.public, size: 16),
+                              SizedBox(width: 8),
+                              Text('Set Remote WAN URL'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'set_primary',
+                          child: Row(
+                            children: [
+                              Icon(Icons.star_outline, size: 16),
+                              SizedBox(width: 8),
+                              Text('Set as Primary Hub'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'unpair',
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete_outline, size: 16, color: GooglePhotosColors.red),
+                              SizedBox(width: 8),
+                              Text('Forget Server', style: TextStyle(color: GooglePhotosColors.red)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatLastSeen(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  void _promptUnpairServer([NearbyPeer? server]) {
+    final target = server ?? _savedPairedServer;
+    if (target == null) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF202124) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.link_off_rounded, color: GooglePhotosColors.red),
-            SizedBox(width: 10),
-            Text('Unpair Backup Server?'),
+            const Icon(Icons.link_off_rounded, color: GooglePhotosColors.red),
+            const SizedBox(width: 10),
+            Expanded(child: Text('Unpair ${target.name}?')),
           ],
         ),
-        content: const Text(
-          'Disconnecting will stop automated camera roll backups to this server until you pair again. Existing backed-up photos on the server will remain untouched.',
-          style: TextStyle(fontSize: 13, height: 1.4),
+        content: Text(
+          'Disconnecting from ${target.name} will stop automated camera roll backups to this server until you pair again. Existing backed-up photos on the server will remain untouched.',
+          style: const TextStyle(fontSize: 13, height: 1.4),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -6377,7 +7106,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             style: FilledButton.styleFrom(backgroundColor: GooglePhotosColors.red),
             onPressed: () {
               Navigator.pop(ctx);
-              _unpairServer();
+              _unpairServer(target);
             },
             child: const Text('Unpair'),
           ),

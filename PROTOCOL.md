@@ -119,11 +119,103 @@ sequenceDiagram
 
 ---
 
-## 5. Mobile Background Execution Strategy
+## 5. Mobile Background Execution & Discovery Hardening
 
-1. **Foreground Service:** Uses Android `FOREGROUND_SERVICE_DATA_SYNC` with an ongoing system notification showing transfer progress.
+1. **Foreground Service & MulticastLock:** Uses Android `FOREGROUND_SERVICE_DATA_SYNC` with an ongoing system notification. In addition to a partial `WakeLock` and `WifiLock`, the service creates and acquires a `WifiManager.MulticastLock` with reference counting disabled. This prevents Linux kernel Wi-Fi driver packet filtering from dropping inbound UDP port 42424 discovery broadcasts while the phone screen is off.
 2. **Wi-Fi SSID Filter:** Configurable setting to restrict heavy transfers only when connected to designated home/office SSIDs.
 3. **Power Management:** Automatically pauses delta index hashing when battery drops below 20% unless plugged into AC power.
+
+---
+
+## 5.1. Persistent Connected Servers Registry & Subnet Sweep Protocol
+
+### A. Connected Server Schema (`.connected_servers.json`)
+The sender stores all paired servers in the persistent application documents sandbox:
+```json
+[
+  {
+    "id": "192.168.178.35:45455",
+    "ip": "192.168.178.35",
+    "port": 45455,
+    "name": "OnePlus 6T (Hub)",
+    "token": "0e853c5573aa1289...",
+    "wanUrl": "http://100.85.12.44:45455",
+    "lastSeen": "2026-11-18T22:15:00.000Z"
+  }
+]
+```
+
+### B. 3-Phase Reconnection Wire Protocol
+When reconnecting or recovering from a home router DHCP IP shift:
+1. **Phase 1 (Direct Probe):**
+   ```http
+   GET /api/info?key=0e853c5573aa... HTTP/1.1
+   Host: 192.168.178.35:45455
+   ```
+   If HTTP 200 is returned, server is marked online immediately.
+2. **Phase 2 (Subnet Sweep):**
+   If Phase 1 fails (timeout/unreachable), the sender obtains its current local IP (e.g. `192.168.178.42`) and sweeps candidate host addresses `192.168.178.1` through `192.168.178.254` concurrently on port `45455` in batches of 25.
+   Each candidate is probed with:
+   ```http
+   GET /api/info?key=0e853c5573aa... HTTP/1.1
+   ```
+   When a node responds with matching authentication and `node_id` or `device_name`, the client updates `server.ip = candidate_ip`, updates `lastSeen = DateTime.now()`, and immediately flushes the changes to `.connected_servers.json`.
+3. **Phase 3 (Remote WAN / Mesh Fallback):**
+   If local sweeps yield no response and `server.wanUrl` is configured (e.g., via Tailscale or DDNS), probes the WAN endpoint.
+4. **Phase 4 (Zero-Config Global Cloudflare Tracker Resolution):**
+   If neither local probes nor manual WAN succeed, the client computes `hub_id = sha256(server.authToken)` and queries the edge tracker:
+   ```http
+   GET /api/hub/resolve?hub_id=5f3d8a9e01bc... HTTP/1.1
+   Host: p2pme.pages.dev
+   ```
+   When the tracker returns active coordinates, the client probes the resolved public IP/port directly and auto-binds the connection.
+
+---
+
+## 5.2. Cloudflare Zero-Knowledge Global Hub Tracker Wire Specification
+
+### A. Hub Announcement (`POST /api/hub/announce`)
+Every 5 minutes, an active Server Hub announces its coordinates to the Cloudflare edge:
+```http
+POST /api/hub/announce HTTP/1.1
+Host: p2pme.pages.dev
+Content-Type: application/json
+
+{
+  "hub_id": "5f3d8a9e01bc47a9821f009988aabbccddeeff00112233445566778899aabbcc",
+  "public_ip": "93.184.216.34",
+  "public_port": 45455,
+  "local_ip": "192.168.178.35",
+  "local_port": 45455,
+  "device_name": "OnePlus 6T (Hub)",
+  "upnp_active": true,
+  "timestamp": 1795000000000
+}
+```
+* **Zero Secret Leakage:** `hub_id` is derived via `sha256(secret_key)`. The plain secret key is **never** sent to the tracker.
+* **Ephemeral TTL:** Announcements carry a strict 15-minute time-to-live (`expirationTtl: 900`). Stale records self-destruct automatically.
+
+### B. Hub Resolution (`GET /api/hub/resolve?hub_id=<sha256>`)
+When a remote sender device needs to locate its paired hub outside the home:
+```http
+GET /api/hub/resolve?hub_id=5f3d8a9e01bc47a9821f009988aabbccddeeff00112233445566778899aabbcc HTTP/1.1
+Host: p2pme.pages.dev
+```
+Response:
+```json
+{
+  "status": "active",
+  "hub_id": "5f3d8a9e01bc47a9821f009988aabbccddeeff00112233445566778899aabbcc",
+  "public_ip": "93.184.216.34",
+  "public_port": 45455,
+  "local_ip": "192.168.178.35",
+  "local_port": 45455,
+  "device_name": "OnePlus 6T (Hub)",
+  "upnp_active": true,
+  "updated_at": 1795000000000,
+  "age_seconds": 45
+}
+```
 
 ---
 

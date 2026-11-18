@@ -969,6 +969,26 @@
     }
   };
 
+  async function resolveHubWanAddress(token) {
+    if (!token || token.trim().length === 0) return null;
+    try {
+      const enc = new TextEncoder().encode(token.trim());
+      const buf = await crypto.subtle.digest('SHA-256', enc);
+      const hashArray = Array.from(new Uint8Array(buf));
+      const hubId = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      const res = await fetch(`https://p2pme.pages.dev/api/hub/resolve?hub_id=${hubId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.status === 'ok' && data.public_ip) {
+          return { host: data.public_ip, port: data.public_port || 45455, upnp: data.upnp_active };
+        }
+      }
+    } catch (err) {
+      console.debug('Global WAN tracker resolve failed:', err);
+    }
+    return null;
+  }
+
   window.sendSelectedToHub = async function(hubId) {
     if (!selectedFiles || selectedFiles.length === 0) {
       if (cameraInput) cameraInput.click();
@@ -1003,7 +1023,9 @@
     const totalFiles = toSend.length;
     const totalBatchBytes = toSend.reduce((sum, f) => sum + (f.size || 0), 0);
     let batchBytesSent = 0;
-    const uploadUrlBase = `http://${hub.host}:${hub.port}/upload`;
+    let currentHost = hub.host;
+    let currentPort = hub.port;
+    let uploadUrlBase = `http://${currentHost}:${currentPort}/upload`;
     const hubToken = hub.token || localStorage.getItem('p2pme_hub_token') || '';
 
     const getSenderDeviceName = () => {
@@ -1096,6 +1118,24 @@
           }
         } catch (err) {
           lastErr = err;
+          // If LAN host unreachable, attempt zero-config Global WAN resolution via Cloudflare edge tracker
+          if (attempt === 1 && hubToken) {
+            try {
+              if (sendStatus) {
+                sendStatus.innerHTML = `<span style="color:#8AB4F8;">Checking Global WAN Tracker for ${escapeHtml(hub.name)}...</span>`;
+              }
+              const wan = await resolveHubWanAddress(hubToken);
+              if (wan && wan.host && (wan.host !== currentHost || wan.port !== currentPort)) {
+                console.log(`Global WAN resolved for hub: ${wan.host}:${wan.port}`);
+                currentHost = wan.host;
+                currentPort = wan.port;
+                uploadUrlBase = `http://${currentHost}:${currentPort}/upload`;
+                attempt--; // Allow full retry attempts on resolved WAN endpoint
+                await new Promise(r => setTimeout(r, 200));
+                continue;
+              }
+            } catch (_) {}
+          }
           if (attempt < 2) {
             await new Promise(r => setTimeout(r, 400));
           }
@@ -1109,17 +1149,17 @@
         if (i === 0) {
           if (sendProgressBar) {
             sendProgressBar.style.width = '100%';
-            sendProgressBar.innerText = 'Direct LAN Portal Available';
+            sendProgressBar.innerText = 'Direct Portal Available';
           }
           if (sendStatus) {
             sendStatus.innerHTML = `
               <div style="background:rgba(26,115,232,0.12);border:1px solid rgba(26,115,232,0.3);border-radius:14px;padding:14px;text-align:left;margin-top:10px;">
-                <div style="font-weight:600;color:#8AB4F8;margin-bottom:6px;">🚀 Direct Local Transfer:</div>
+                <div style="font-weight:600;color:#8AB4F8;margin-bottom:6px;">🚀 Direct Transfer Portal:</div>
                 <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
-                  Browser HTTPS security policy: To stream files directly over Wi-Fi without cloud servers, tap to open the local portal on your receiver phone:
+                  Direct socket endpoint (${escapeHtml(currentHost)}:${currentPort}): Tap to open the WebDrop portal on your receiver:
                 </div>
-                <a href="http://${hub.host}:${hub.port}/" target="_blank" style="display:inline-block;background:var(--google-blue);color:white;padding:8px 18px;border-radius:20px;text-decoration:none;font-size:13px;font-weight:600;">
-                  Open ${escapeHtml(hub.name)} Direct Portal &rarr;
+                <a href="http://${currentHost}:${currentPort}/" target="_blank" style="display:inline-block;background:var(--google-blue);color:white;padding:8px 18px;border-radius:20px;text-decoration:none;font-size:13px;font-weight:600;">
+                  Open ${escapeHtml(hub.name)} Portal &rarr;
                 </a>
               </div>
             `;

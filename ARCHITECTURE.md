@@ -66,17 +66,19 @@ To guarantee 100% connectivity between any two devices globally—whether across
 | Tier | Network Path | Mechanism | Latency / Speed | Offline? |
 | :--- | :--- | :--- | :--- | :--- |
 | **Tier 0** | **Direct USB Cable** | CDC-NCM / RNDIS USB Tethering / Hotspot point-to-point link | Sub-millisecond / Full USB wire-speed (100–480+ Mbps) | **Yes** (100% offline, 0% Wi-Fi) |
-| **Tier 1** | **Direct LAN** | mDNS + Multicast UDP discovery | Sub-millisecond / Full LAN wire-speed (1–10 Gbps) | **Yes** (100% offline) |
-| **Tier 2** | **Direct WAN / Mesh** | Tailscale / WireGuard / IPv6 / Router Port Forward | Internet ping / Full ISP & 5G line speed | No |
-| **Tier 3** | **Direct WAN (Punched)** | STUN + UDP Hole Punching | Direct UDP path / Full ISP line speed | No |
-| **Tier 4** | **Encrypted Relay** | DERP packet forwarder / Zero-Knowledge Relay | Proxied / Bandwidth capped by relay | No |
+| **Tier 1** | **Direct LAN** | mDNS + Multicast UDP discovery (`MulticastLock`) | Sub-millisecond / Full LAN wire-speed (1–10 Gbps) | **Yes** (100% offline) |
+| **Tier 2** | **Automated Global WAN** | Native UPnP / NAT-PMP IGD + Cloudflare Tracker (`/api/hub/*`) | Internet ping / Full ISP line speed (No VPN needed) | No |
+| **Tier 3** | **Encrypted Mesh / Tailscale** | Tailscale / WireGuard / IPv6 / Manual Port Forward | Internet ping / Full ISP & 5G line speed | No |
+| **Tier 4** | **Direct WAN (Punched)** | Google STUN + UDP Hole Punching | Direct UDP path / Full ISP line speed | No |
+| **Tier 5** | **Encrypted Relay** | DERP packet forwarder / Zero-Knowledge Relay | Proxied / Bandwidth capped by relay | No |
 
 ### Connection Fallback Lifecycle
 1. **Physical Cable First (Tier 0):** If a USB-C or Lightning cable connects the two devices (with USB tethering enabled on mobile), P2Pme discovers the virtual CDC-NCM/RNDIS adapter and locks to the physical link-local socket, bypassing Wi-Fi entirely.
 2. **Local Wi-Fi Next (Tier 1):** When two devices pair via an authentication ticket or QR code, both nodes announce themselves to the local subnet via mDNS and UDP broadcast beacons. If both peers are on the same Wi-Fi, the connection locks to the LAN address for maximum bandwidth.
-3. **Mesh & Remote WAN Failover (Tier 2):** When a sender switches from home Wi-Fi to cellular (5G/LTE), local subnet pings fail. The client automatically fails over to the paired node's WAN/Mesh address (e.g. Tailscale IP or public domain) configured in the pairing ticket or manual remote dialog.
-4. **STUN & Hole Punching (Tier 3):** If peers are on separate uncoordinated networks, STUN probes public IP/port candidates and initiates simultaneous UDP hole punching.
-5. **Encrypted Relay (Tier 4):** If carrier-grade symmetric NAT (CGNAT) on mobile data blocks direct hole punches, peers communicate through an encrypted DERP relay session where data is protected by Noise/TLS 1.3.
+3. **Automated Zero-Config Global WAN (Tier 2):** When a sender switches from home Wi-Fi to cellular (5G/LTE), local subnet pings fail. The client automatically queries the Cloudflare zero-knowledge edge tracker (`https://p2pme.pages.dev/api/hub/resolve?hub_id=<sha256>`). The home router's automated UPnP/NAT-PMP port mapping forwards traffic directly to the Server Hub with zero manual setup.
+4. **Mesh & Remote WAN Failover (Tier 3):** If UPnP is disabled on the home router, the client falls back to the paired node's WAN/Mesh address (e.g. Tailscale IP or public domain) configured in the pairing ticket or manual remote dialog.
+5. **STUN & Hole Punching (Tier 4):** If peers are on separate uncoordinated networks, STUN probes public IP/port candidates and initiates simultaneous UDP hole punching.
+6. **Encrypted Relay (Tier 5):** If carrier-grade symmetric NAT (CGNAT) on mobile data blocks direct hole punches, peers communicate through an encrypted DERP relay session where data is protected by Noise/TLS 1.3.
 
 ---
 
@@ -132,26 +134,38 @@ P2Pme is architected to operate without mandatory app store monopolies, supporti
 
 ---
 
-## 7. Nearby Wi-Fi Discovery & Pairing
+## 7. Nearby Wi-Fi Discovery, Persistent Registry & Pairing
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Phone as Mobile / Sender (Android/iOS)
     participant Subnet as Local Wi-Fi Subnet (Broadcast)
-    participant Desktop as Computer / Receiver (Windows)
+    participant Server as 24/7 Server Hub (Android Background)
 
-    Note over Phone,Desktop: Both devices connected to same Wi-Fi
-    Desktop->>Subnet: UDP Broadcast on Port 42424 (P2Pme Beacon)
-    Note over Subnet: Payload: { p2pme: true, name: "PC", http_port: 45455, token: "..." }
-    Phone->>Subnet: Listen / Announce on Port 42424
-    Phone->>Desktop: Direct LAN HTTP Connection (Direct Drop / Folder Sync)
-    Desktop-->>Phone: TLS/Token Verified Transfer Stream
+    Note over Server: Android Foreground Service holds MulticastLock
+    Server->>Subnet: UDP Broadcast on Port 42424 (P2Pme Beacon)
+    Note over Subnet: Payload: { p2pme: true, name: "Server", http_port: 45455, token: "..." }
+    
+    alt Sender on same Wi-Fi
+        Phone->>Subnet: Listen / Announce on Port 42424
+        Phone->>Server: Direct LAN HTTP Connection (/api/info with token)
+        Server-->>Phone: Verified Server Status (Storage free, auth valid)
+    else Sender returning home (DHCP IP changed)
+        Phone->>Phone: Check Persistent Registry (.connected_servers.json)
+        Phone->>Subnet: 3-Phase Reconnect Engine (Direct -> /24 Subnet Sweep -> WAN)
+        Phone->>Server: Ping & match node_id / device_name
+        Server-->>Phone: Acknowledge & update IP in persistent registry
+    end
 ```
 
-1. **UDP Broadcast Beacon:** Nodes on the local Wi-Fi subnet broadcast discovery packets on UDP port `42424` containing node name, endpoint, and dynamic session token.
-2. **Immediate 1-Tap Connection:** Nearby devices appear instantly in the UI with signal and IP metadata. Tapping connects directly via LAN wire-speed.
-3. **Dynamic IP Tolerance:** Device IP addresses (e.g., `192.168.x.x`) assigned by DHCP can change dynamically; the beacon protocol re-advertises new network endpoints automatically without requiring manual re-configuration.
+1. **UDP Broadcast Beacon & MulticastLock:** Nodes operating as Receiver or 24/7 Server Hub broadcast discovery beacons on UDP port `42424`. On Android, the native background service acquires `WifiManager.MulticastLock` to ensure the Linux Wi-Fi driver does not filter multicast/broadcast packets when the screen is powered off.
+2. **Persistent Connected Servers Registry:** Senders persist all successfully paired servers to `.connected_servers.json`. Unlike transient scan caches, this registry survives app restarts, device reboots, and network changes.
+3. **Dynamic 3-Phase Reconnection Engine:** When a sender leaves and returns home (or when the home router DHCP assigns a new IP to the server), the sender executes a systematic 3-phase reconnection:
+   * **Phase 1 (Direct Ping):** Tests the last-known IP via `GET /api/info` with the saved pairing token.
+   * **Phase 2 (Subnet Sweep):** Concurrently sweeps the local `/24` subnet in batches of 25 nodes, querying `/api/info` and matching by persistent `node_id` or device name. When found, the registry automatically updates the IP and saves to disk.
+   * **Phase 3 (Remote WAN / Mesh Fallback):** If configured with a Tailscale/WireGuard IP or DDNS host, falls back to probing the remote WAN endpoint.
+4. **Immediate 1-Tap Connection & Manual Reconnect:** Senders display all known servers in both the Quick Beam (Transfer) and Backup tabs with live status indicators, a 1-tap "Send Here" beam button, and a dedicated "Reconnect / Ping" button.
 
 ---
 

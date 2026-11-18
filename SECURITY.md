@@ -118,6 +118,21 @@
   * **Automatic Battery Gate:** Automatic background backup is inhibited when device battery drops below 15% and is discharging.
   * **Transparent User Warning:** Manual bulk backups display cautionary notices if battery is low, recommending connection to a power source.
 
+### P. Persistent Server Registry Isolation & Multicast Discovery Boundaries
+* **Risk:** Exposure of saved server tokens or denial-of-service via spoofed UDP beacons; loss of server discovery during Android Doze mode.
+* **Mitigation:**
+  * **Document Sandbox Encryption:** The `.connected_servers.json` registry is stored strictly in the application's private, encrypted sandboxed documents directory (`/data/user/0/net.p2pme.p2pme_app/app_flutter/`). It is never accessible to other installed applications.
+  * **Scoped Token Authorization:** Every HTTP probe and sweep request carries the cryptographic secret token assigned during initial pairing. Unauthenticated or mis-matched nodes on the subnet are ignored, preventing rogue machines from hijacking paired sessions.
+  * **Kernel Multicast Lock Protection:** The background service uses `WifiManager.MulticastLock` with strict lifecycle cleanup on service stop, ensuring battery efficiency while eliminating silent packet drops on 24/7 listener nodes.
+
+### Q. Zero-Knowledge Global Tracker Threat Model & UPnP Router Isolation
+* **Risk:** Exposure of server endpoints, credential leakage, or unauthorized WAN traversal via public discovery endpoints.
+* **Mitigation:**
+  * **One-Way SHA-256 Hub Identity:** The global tracker identifier is derived as `sha256(hub_secret_key)`. Because SHA-256 is cryptographically one-way and collision-resistant, knowing the `hub_id` reveals zero information about the actual secret key used to authenticate transfers.
+  * **Zero Data Relay & Zero Central Logs:** The Cloudflare tracker functions purely as a dynamic coordinate registry (< 1 KB per entry). It never relays files, payloads, or metadata. All file transfers occur directly peer-to-peer over mutual TLS/token-protected sockets.
+  * **Strict 15-Minute Ephemeral TTL:** All announcements expire after 900 seconds. If a server stops or switches off, its external address disappears automatically from the global registry.
+  * **Explicit UPnP Port Cleanup:** When the user switches roles or stops the Server Hub, `UpnpService.unmapPort()` issues a `DeletePortMapping` SOAP action to close the opened port on the home router.
+
 ---
 
 ## 3. Reporting a Vulnerability

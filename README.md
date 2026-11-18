@@ -34,6 +34,11 @@
 * **Dedicated Receiver Destination Selection:** Choose where incoming files land before receiving, with a 1-tap option to save the chosen path as your persistent default destination.
 
 ### 🔄 2. Backup Tab: Continuous Background Sync
+* **Persistent Connected Servers Registry (`.connected_servers.json`):** Retains all previously paired servers indefinitely across app restarts, reboots, and network switches. Displays connected servers in both the Transfer and Backup tabs with live online/offline status, storage free telemetry, 1-tap "Send Here" beam, and a manual "Reconnect / Ping" button.
+* **Intelligent 3-Phase Auto-Reconnect Engine:** Recovers seamlessly when returning home or when the home router DHCP assigns a new IP address to the 24/7 server:
+  * **Phase 1 (Direct Ping):** Instantly pings last-known IP via `/api/info`.
+  * **Phase 2 (Subnet Sweep):** Concurrently sweeps the local `/24` subnet in batches of 25 nodes, queries `/api/info`, and matches the server by cryptographic token and device ID. When found, automatically updates the server IP and saves it to disk.
+  * **Phase 3 (Remote WAN / Tailscale Fallback):** Probes remote WAN/mesh endpoint if away from home.
 * **Instant Camera QR Server Pairing:** 1-tap connection to your 24/7 Server Hub. Tap "Scan Server QR Code" on your sending phone (e.g. iPhone) and point at the Server Hub screen (e.g. Android phone or PC). Automatically parses IP, port, remote WAN address, and 256-bit CSPRNG security tokens for instantaneous zero-typing pairing.
 * **Multi-Transport Connection Tiers:**
   * **⚡ Tier 1 (Direct USB Cable):** Hardware wire speed (35–400+ MB/s) with 0% packet loss and zero Wi-Fi required via USB tethering / USB-to-USB link.
@@ -59,6 +64,7 @@
 * **1-Tap Ticket Regeneration & Revocation:** Securely revoke and generate a brand-new BLAKE3 folder pairing ticket with a single tap, instantly retiring older tickets to guarantee zero conflict.
 
 ### 🖥️ 3. Server Tab: 24/7 Backup Hub & Receiver
+* **🌐 Zero-Config Global WAN (Resilio Sync Style):** Automatically maps external port `45455` on your home router via UPnP / NAT-PMP IGD, discovers public coordinates via Google STUN, and announces to the Cloudflare zero-knowledge edge tracker (`/api/hub/announce`). Senders away from home automatically resolve and connect to your home hub with zero router configuration, zero VPN apps, and zero subscription costs!
 * **Turn Any Device into a Server:** Toggle 24/7 Backup Server mode to accept incoming drops and continuous backups with background keep-alive.
 * **Dual-Endpoint Pairing (LAN + Remote/WAN):** Configure an optional Remote / WAN Endpoint (e.g. Tailscale IP or domain). QR code embeds `&wan=...` for seamless zero-config pairing across both LAN and internet.
 * **⚡ Direct USB Cable Interface Detection:** Automatically discovers active USB tethering interfaces (`rndis`, `usb`, `ncm`, `cdc`) and exposes them for direct cable backup.

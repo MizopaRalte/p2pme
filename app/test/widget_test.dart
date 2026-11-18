@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:p2pme_app/main.dart';
+import 'package:p2pme_app/services/stun_service.dart';
+import 'package:p2pme_app/services/upnp_service.dart';
+import 'package:p2pme_app/services/global_hub_discovery.dart';
 
 void main() {
   testWidgets('Dedicated Role Selection and Isolation smoke test', (WidgetTester tester) async {
@@ -185,5 +188,120 @@ void main() {
     expect(activeSessions.length, 1);
     expect(activeSessions.containsKey(session2.sessionId), isTrue);
     expect(activeSessions[session2.sessionId]!.fileName, 'Video_4K.mov');
+  });
+
+  test('Connected Server Registry multi-server persistence, serialization, and DHCP re-addressing', () {
+    final server1 = NearbyPeer(
+      id: 'node-android-oneplus',
+      name: 'OnePlus 6T Server Hub',
+      ip: '192.168.178.35',
+      port: 45455,
+      deviceType: 'android',
+      lastSeen: DateTime.now(),
+      authToken: '0e853c5573aa9821f',
+      isPaired: true,
+      freeStorageBytes: 45000000000,
+      totalStorageBytes: 128000000000,
+    );
+
+    final server2 = NearbyPeer(
+      id: 'node-windows-desktop',
+      name: 'Main Living Room PC',
+      ip: '192.168.178.100',
+      port: 45455,
+      deviceType: 'pc',
+      lastSeen: DateTime.now(),
+      authToken: 'f1a980bc2345',
+      isPaired: true,
+      wanHost: 'mypc.ts.net',
+      wanPort: 45455,
+      freeStorageBytes: 850000000000,
+      totalStorageBytes: 2000000000000,
+    );
+
+    // Verify Serialization & Deserialization
+    final jsonList = [server1.toJson(), server2.toJson()];
+    final restoredList = jsonList.map((m) => NearbyPeer.fromJson(m)).toList();
+
+    expect(restoredList.length, 2);
+    expect(restoredList[0].name, 'OnePlus 6T Server Hub');
+    expect(restoredList[0].ip, '192.168.178.35');
+    expect(restoredList[0].isPaired, isTrue);
+    expect(restoredList[0].authToken, '0e853c5573aa9821f');
+    expect(restoredList[1].name, 'Main Living Room PC');
+    expect(restoredList[1].wanHost, 'mypc.ts.net');
+
+    // Simulate DHCP address shift on home network (router re-assigned .35 to .42)
+    restoredList[0].ip = '192.168.178.42';
+    final updatedJson = restoredList[0].toJson();
+    expect(updatedJson['ip'], '192.168.178.42');
+    expect(updatedJson['authToken'], '0e853c5573aa9821f');
+  });
+
+  test('Zero-Config Global WAN Discovery (STUN, UPnP, and Cloudflare Hub ID derivation)', () {
+    // 1. Verify Zero-Knowledge SHA-256 Hub ID derivation
+    const rawSecretKey = '5f3d8a9e01bc47a9821f009988aabbccddeeff00112233445566778899aabbcc';
+    final hubId = GlobalHubDiscovery.computeHubId(rawSecretKey);
+    expect(hubId.length, 64);
+    expect(RegExp(r'^[a-f0-9]{64}$').hasMatch(hubId), isTrue);
+
+    // Consistency check: same secret always yields exact same hubId
+    final hubId2 = GlobalHubDiscovery.computeHubId(rawSecretKey);
+    expect(hubId, hubId2);
+
+    // Differentiation: different secret yields distinct hubId
+    final diffId = GlobalHubDiscovery.computeHubId('different_secret_key');
+    expect(diffId, isNot(equals(hubId)));
+
+    // 2. Verify ResolvedHub model and wanUrl generation
+    final resolvedHub = ResolvedHub(
+      hubId: hubId,
+      publicIp: '93.184.216.34',
+      publicPort: 45455,
+      localIp: '192.168.178.35',
+      localPort: 45455,
+      deviceName: 'OnePlus 6T Server Hub',
+      upnpActive: true,
+      ageSeconds: 45,
+    );
+    expect(resolvedHub.wanUrl, 'http://93.184.216.34:45455');
+    expect(resolvedHub.upnpActive, isTrue);
+
+    // 3. Verify HubAnnouncementState statusSummary across states
+    final upnpSuccess = const UpnpResult(
+      isSuccess: true,
+      externalIp: '93.184.216.34',
+      externalPort: 45455,
+      routerModel: 'Fritz!Box 7590',
+    );
+    final upnpState = HubAnnouncementState(
+      hubId: hubId,
+      publicIp: '93.184.216.34',
+      publicPort: 45455,
+      upnpResult: upnpSuccess,
+      isAnnounced: true,
+    );
+    expect(upnpState.statusSummary, contains('UPnP: 93.184.216.34:45455'));
+
+    final stunSuccess = const StunResult(
+      publicIp: '84.115.80.12',
+      publicPort: 54321,
+      stunServer: 'stun.l.google.com:19302',
+    );
+    final stunState = HubAnnouncementState(
+      hubId: hubId,
+      publicIp: '84.115.80.12',
+      publicPort: 54321,
+      stunResult: stunSuccess,
+      isAnnounced: true,
+    );
+    expect(stunState.statusSummary, contains('STUN: 84.115.80.12:54321'));
+
+    final localOnlyState = HubAnnouncementState(
+      hubId: hubId,
+      publicPort: 45455,
+      isAnnounced: false,
+    );
+    expect(localOnlyState.statusSummary, 'Local Wi-Fi Only');
   });
 }
