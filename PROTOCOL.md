@@ -122,8 +122,9 @@ sequenceDiagram
 ## 5. Mobile Background Execution & Discovery Hardening
 
 1. **Foreground Service & MulticastLock:** Uses Android `FOREGROUND_SERVICE_DATA_SYNC` with an ongoing system notification. In addition to a partial `WakeLock` and `WifiLock`, the service creates and acquires a `WifiManager.MulticastLock` with reference counting disabled. This prevents Linux kernel Wi-Fi driver packet filtering from dropping inbound UDP port 42424 discovery broadcasts while the phone screen is off.
-2. **Wi-Fi SSID Filter:** Configurable setting to restrict heavy transfers only when connected to designated home/office SSIDs.
-3. **Power Management:** Automatically pauses delta index hashing when battery drops below 20% unless plugged into AC power.
+2. **Server Lifecycle & Master Switch:** The Server Hub engine is **OFF by default** on all platforms. When the user enables the server, `serverEnabled: true` is persisted in `.p2pme_config.json`, opening TCP port `45455`, activating UPnP router port forwarding, STUN edge discovery, and the Android background service. The server stays active always across app launches and system reboots until manually stopped. Toggling OFF sets `serverEnabled: false`, immediately closes the socket, issues UPnP `DeletePortMapping`, ceases discovery beacons, and terminates background services.
+3. **Wi-Fi SSID Filter:** Configurable setting to restrict heavy transfers only when connected to designated home/office SSIDs.
+4. **Power Management:** Automatically pauses delta index hashing when battery drops below 20% unless plugged into AC power.
 
 ---
 

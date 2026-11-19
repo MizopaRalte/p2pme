@@ -64,6 +64,7 @@
 * **1-Tap Ticket Regeneration & Revocation:** Securely revoke and generate a brand-new BLAKE3 folder pairing ticket with a single tap, instantly retiring older tickets to guarantee zero conflict.
 
 ### 🖥️ 3. Server Tab: 24/7 Backup Hub & Receiver
+* **Explicit Server Master Switch (OFF by Default, Persistent State):** The 24/7 server engine is OFF by default on all platforms upon setup. Toggling the master switch ON starts the listener, maps router ports, and persists `serverEnabled: true` in configuration so the server remains active always across app restarts and reboots. Toggling OFF cleanly stops the socket, releases UPnP router mappings, stops background services, and keeps the server stopped until manually toggled on again.
 * **🌐 Zero-Config Global WAN (Resilio Sync Style):** Automatically maps external port `45455` on your home router via UPnP / NAT-PMP IGD, discovers public coordinates via Google STUN, and announces to the Cloudflare zero-knowledge edge tracker (`/api/hub/announce`). Senders away from home automatically resolve and connect to your home hub with zero router configuration, zero VPN apps, and zero subscription costs!
 * **Turn Any Device into a Server:** Toggle 24/7 Backup Server mode to accept incoming drops and continuous backups with background keep-alive.
 * **Dual-Endpoint Pairing (LAN + Remote/WAN):** Configure an optional Remote / WAN Endpoint (e.g. Tailscale IP or domain). QR code embeds `&wan=...` for seamless zero-config pairing across both LAN and internet.

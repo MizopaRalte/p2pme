@@ -304,4 +304,46 @@ void main() {
     );
     expect(localOnlyState.statusSummary, 'Local Wi-Fi Only');
   });
+
+  testWidgets('Server Hub is OFF by default, turns ON when toggled, and can be manually stopped', (WidgetTester tester) async {
+    await tester.pumpWidget(const P2PmeApp());
+    await tester.pumpAndSettle();
+
+    // 1. Enter Server role
+    final serverRoleCard = find.text('Server  (24/7 Dedicated Hub)');
+    await tester.ensureVisible(serverRoleCard);
+    await tester.pumpAndSettle();
+    await tester.tap(serverRoleCard);
+    await tester.pumpAndSettle();
+
+    // 2. Verify Server is OFF by default
+    expect(find.text('24/7 Backup Server'), findsOneWidget);
+    expect(find.text('OFF'), findsOneWidget);
+    expect(find.text('Server is Currently OFF'), findsOneWidget);
+    expect(find.text('Start Server'), findsOneWidget);
+
+    // 3. Scroll to and tap Start Server button to turn server ON
+    final startBtn = find.text('Start Server');
+    await tester.ensureVisible(startBtn);
+    await tester.pumpAndSettle();
+    await tester.tap(startBtn);
+    await tester.pumpAndSettle();
+
+    // Verify Server is now ONLINE
+    expect(find.text('ONLINE'), findsOneWidget);
+    expect(find.text('Stop Server'), findsOneWidget);
+
+    // 4. Manually stop server via Stop Server button
+    final stopBtn = find.text('Stop Server');
+    await tester.ensureVisible(stopBtn);
+    await tester.pumpAndSettle();
+    await tester.tap(stopBtn);
+    await tester.pumpAndSettle();
+
+    // Verify Server returned to OFF state
+    expect(find.text('OFF'), findsOneWidget);
+    expect(find.text('Start Server'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+  });
 }

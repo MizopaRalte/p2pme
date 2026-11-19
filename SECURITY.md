@@ -133,6 +133,12 @@
   * **Strict 15-Minute Ephemeral TTL:** All announcements expire after 900 seconds. If a server stops or switches off, its external address disappears automatically from the global registry.
   * **Explicit UPnP Port Cleanup:** When the user switches roles or stops the Server Hub, `UpnpService.unmapPort()` issues a `DeletePortMapping` SOAP action to close the opened port on the home router.
 
+### R. Default-Off Server Exposure Minimization & User Sovereignty
+* **Risk:** Unintended port exposure or background battery consumption on devices that only intend to send files or run on public Wi-Fi networks.
+* **Mitigation:**
+  * **Secure-by-Default (Zero Unsolicited Listeners):** The Server Hub engine is OFF by default across all platforms upon installation or role initialization (`_isServerEnabled = false`). No TCP ports are bound, no UPnP router holes are opened, and no background listener services are started until the user explicitly toggles the master switch ON.
+  * **Persistent User Intent (`serverEnabled`):** When enabled, state is securely persisted in the application documents sandbox so it remains on across restarts. When toggled OFF, sockets, router port mappings, and background services are completely torn down, ensuring the device returns to zero listening attack surface.
+
 ---
 
 ## 3. Reporting a Vulnerability

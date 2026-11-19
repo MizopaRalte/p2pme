@@ -159,7 +159,7 @@ sequenceDiagram
     end
 ```
 
-1. **UDP Broadcast Beacon & MulticastLock:** Nodes operating as Receiver or 24/7 Server Hub broadcast discovery beacons on UDP port `42424`. On Android, the native background service acquires `WifiManager.MulticastLock` to ensure the Linux Wi-Fi driver does not filter multicast/broadcast packets when the screen is powered off.
+1. **UDP Broadcast Beacon & MulticastLock:** Nodes operating as Receiver or 24/7 Server Hub broadcast discovery beacons on UDP port `42424`. The Server Hub engine is **OFF by default** on all platforms upon installation or role initialization (`_isServerEnabled = false`). Only when the user explicitly turns the Server toggle switch ON does the app bind to port `45455`, begin UDP discovery broadcasting, map router ports via UPnP, announce to the Cloudflare edge tracker, and acquire Android `WifiManager.MulticastLock`. This setting is persisted in `.p2pme_config.json`, ensuring the server stays active always across app launches and device reboots until the user manually toggles it OFF. When toggled OFF, sockets close, router port mappings are immediately deleted via UPnP, and beacons cease.
 2. **Persistent Connected Servers Registry:** Senders persist all successfully paired servers to `.connected_servers.json`. Unlike transient scan caches, this registry survives app restarts, device reboots, and network changes.
 3. **Dynamic 3-Phase Reconnection Engine:** When a sender leaves and returns home (or when the home router DHCP assigns a new IP to the server), the sender executes a systematic 3-phase reconnection:
    * **Phase 1 (Direct Ping):** Tests the last-known IP via `GET /api/info` with the saved pairing token.
