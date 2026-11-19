@@ -37,6 +37,24 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.3.2",
+          "buildVersion": "19",
+          "date": "2026-11-19",
+          "localizedDescription": "Remove UPnP router modification and dropper permissions to guarantee 100% clean Google Play Protect verification",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.3.2.ipa",
+          "size": 7659926,
+          "sha256": "543b59c160a7d45601d1c088c787d1fb2f66be8136e722d423d6cad6ddc83895",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.3.1",
           "buildVersion": "18",
           "date": "2026-11-19",
