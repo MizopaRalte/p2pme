@@ -37,6 +37,24 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.3.1",
+          "buildVersion": "18",
+          "date": "2026-11-19",
+          "localizedDescription": "Server is off by default across all platforms with persistent toggle switch, router unmapping on stop, and stay-on persistence",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.3.1.ipa",
+          "size": 7689746,
+          "sha256": "9623aa7822e59f78cd6c64434615469488178fd37ea2cd1cbb84ef920ade9751",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.3.0",
           "buildVersion": "17",
           "date": "2026-11-19",
