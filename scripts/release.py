@@ -167,30 +167,35 @@ def main():
             ]
             
             if not matching_runs:
-                print(f"Waiting for workflow run to register... ({attempt+1}/40)")
+                print(f"Waiting for workflow run to register... ({attempt+1}/80)")
                 continue
 
-            run_obj = matching_runs[0]
-            run_id = run_obj['id']
-            run_status = run_obj['status']
-            print(f"Run {run_id}: status={run_status}")
+            for run_obj in matching_runs:
+                run_id = run_obj['id']
+                run_status = run_obj['status']
+                run_branch = run_obj.get('head_branch') or run_obj.get('head_sha', '')[:7]
+                print(f"Run {run_id} ({run_branch}): status={run_status}")
 
-            # Check artifacts as soon as they become available
-            try:
-                art_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/actions/runs/{run_id}/artifacts', headers=headers)
-                art_data = json.loads(urllib.request.urlopen(art_req).read().decode('utf-8'))
-                for a in art_data.get('artifacts', []):
-                    if a['name'] == 'p2pme-ios-ipa':
-                        ipa_artifact_id = a['id']
-                        break
-            except Exception as e:
-                print(f"Error checking artifacts: {e}")
+                # Check artifacts as soon as they become available
+                try:
+                    art_req = urllib.request.Request(f'https://api.github.com/repos/MizopaRalte/p2pme/actions/runs/{run_id}/artifacts', headers=headers)
+                    art_data = json.loads(urllib.request.urlopen(art_req).read().decode('utf-8'))
+                    for a in art_data.get('artifacts', []):
+                        if a['name'] == 'p2pme-ios-ipa':
+                            ipa_artifact_id = a['id']
+                            break
+                except Exception as e:
+                    print(f"Error checking artifacts for run {run_id}: {e}")
+
+                if ipa_artifact_id:
+                    break
 
             if ipa_artifact_id:
                 log(f"Found macOS-compiled iOS IPA artifact (ID: {ipa_artifact_id})!")
                 break
 
-            if run_status == 'completed':
+            if all(r['status'] == 'completed' for r in matching_runs):
+                print("All matching runs have completed.")
                 break
 
         if not ipa_artifact_id:
