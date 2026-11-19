@@ -3,9 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:p2pme_app/main.dart';
-import 'package:p2pme_app/services/stun_service.dart';
-import 'package:p2pme_app/services/upnp_service.dart';
-import 'package:p2pme_app/services/global_hub_discovery.dart';
 
 void main() {
   testWidgets('Dedicated Role Selection and Isolation smoke test', (WidgetTester tester) async {
@@ -238,73 +235,6 @@ void main() {
     expect(updatedJson['authToken'], '0e853c5573aa9821f');
   });
 
-  test('Zero-Config Global WAN Discovery (STUN, UPnP, and Cloudflare Hub ID derivation)', () {
-    // 1. Verify Zero-Knowledge SHA-256 Hub ID derivation
-    const rawSecretKey = '5f3d8a9e01bc47a9821f009988aabbccddeeff00112233445566778899aabbcc';
-    final hubId = GlobalHubDiscovery.computeHubId(rawSecretKey);
-    expect(hubId.length, 64);
-    expect(RegExp(r'^[a-f0-9]{64}$').hasMatch(hubId), isTrue);
-
-    // Consistency check: same secret always yields exact same hubId
-    final hubId2 = GlobalHubDiscovery.computeHubId(rawSecretKey);
-    expect(hubId, hubId2);
-
-    // Differentiation: different secret yields distinct hubId
-    final diffId = GlobalHubDiscovery.computeHubId('different_secret_key');
-    expect(diffId, isNot(equals(hubId)));
-
-    // 2. Verify ResolvedHub model and wanUrl generation
-    final resolvedHub = ResolvedHub(
-      hubId: hubId,
-      publicIp: '93.184.216.34',
-      publicPort: 45455,
-      localIp: '192.168.178.35',
-      localPort: 45455,
-      deviceName: 'OnePlus 6T Server Hub',
-      upnpActive: true,
-      ageSeconds: 45,
-    );
-    expect(resolvedHub.wanUrl, 'http://93.184.216.34:45455');
-    expect(resolvedHub.upnpActive, isTrue);
-
-    // 3. Verify HubAnnouncementState statusSummary across states
-    final upnpSuccess = const UpnpResult(
-      isSuccess: true,
-      externalIp: '93.184.216.34',
-      externalPort: 45455,
-      routerModel: 'Fritz!Box 7590',
-    );
-    final upnpState = HubAnnouncementState(
-      hubId: hubId,
-      publicIp: '93.184.216.34',
-      publicPort: 45455,
-      upnpResult: upnpSuccess,
-      isAnnounced: true,
-    );
-    expect(upnpState.statusSummary, contains('UPnP: 93.184.216.34:45455'));
-
-    final stunSuccess = const StunResult(
-      publicIp: '84.115.80.12',
-      publicPort: 54321,
-      stunServer: 'stun.l.google.com:19302',
-    );
-    final stunState = HubAnnouncementState(
-      hubId: hubId,
-      publicIp: '84.115.80.12',
-      publicPort: 54321,
-      stunResult: stunSuccess,
-      isAnnounced: true,
-    );
-    expect(stunState.statusSummary, contains('STUN: 84.115.80.12:54321'));
-
-    final localOnlyState = HubAnnouncementState(
-      hubId: hubId,
-      publicPort: 45455,
-      isAnnounced: false,
-    );
-    expect(localOnlyState.statusSummary, 'Local Wi-Fi Only');
-  });
-
   testWidgets('Server Hub is OFF by default, turns ON when toggled, and can be manually stopped', (WidgetTester tester) async {
     await tester.pumpWidget(const P2PmeApp());
     await tester.pumpAndSettle();
@@ -316,11 +246,14 @@ void main() {
     await tester.tap(serverRoleCard);
     await tester.pumpAndSettle();
 
-    // 2. Verify Server is OFF by default
+    // 2. Verify Server is OFF by default and no conflicting "Background Auto-Sync" exists
     expect(find.text('24/7 Backup Server'), findsOneWidget);
     expect(find.text('OFF'), findsOneWidget);
     expect(find.text('Server is Currently OFF'), findsOneWidget);
     expect(find.text('Start Server'), findsOneWidget);
+    expect(find.text('Background Keep-Alive Daemon'), findsOneWidget);
+    expect(find.text('OFF (ZERO DRAIN)'), findsOneWidget);
+    expect(find.text('Background Auto-Sync'), findsNothing);
 
     // 3. Scroll to and tap Start Server button to turn server ON
     final startBtn = find.text('Start Server');
@@ -329,9 +262,10 @@ void main() {
     await tester.tap(startBtn);
     await tester.pumpAndSettle();
 
-    // Verify Server is now ONLINE
+    // Verify Server and Keep-Alive Daemon are now ONLINE / RUNNING 24/7
     expect(find.text('ONLINE'), findsOneWidget);
     expect(find.text('Stop Server'), findsOneWidget);
+    expect(find.text('RUNNING 24/7'), findsOneWidget);
 
     // 4. Manually stop server via Stop Server button
     final stopBtn = find.text('Stop Server');
@@ -340,9 +274,11 @@ void main() {
     await tester.tap(stopBtn);
     await tester.pumpAndSettle();
 
-    // Verify Server returned to OFF state
+    // Verify Server returned to OFF state and Daemon is OFF
     expect(find.text('OFF'), findsOneWidget);
     expect(find.text('Start Server'), findsOneWidget);
+    expect(find.text('OFF (ZERO DRAIN)'), findsOneWidget);
+    expect(find.text('Background Auto-Sync'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
   });

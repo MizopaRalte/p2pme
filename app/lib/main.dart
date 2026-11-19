@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'services/p2p_bridge.dart';
 import 'services/camera_backup_service.dart';
-import 'services/global_hub_discovery.dart';
 import 'screens/qr_scanner_screen.dart';
 
 void main() {
@@ -762,7 +761,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Background Sync & Platform Channels
   static const MethodChannel _bgChannel = MethodChannel('net.p2pme/background_sync');
-  bool _backgroundSyncEnabled = true;
+  bool _backgroundSyncEnabled = false;
   bool _wifiOnlySync = false;
   bool _batteryOptimizationIgnored = false;
 
@@ -910,12 +909,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _usbCableIp;
   bool _isUsbCableConnected = false;
   bool _isScanningNearby = false;
-  String? _globalWanStatus;
-  bool _isGlobalWanActive = false;
 
   // App Update Checker
-  int _currentVersionCode = 18;
-  String _currentVersionName = '1.3.1';
+  int _currentVersionCode = 19;
+  String _currentVersionName = '1.3.2';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -1846,35 +1843,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       }
 
-      // Phase 4: Zero-Config Global Cloudflare Tracker Resolution (Resilio Sync Style)
-      if (!success && server.authToken != null && server.authToken!.isNotEmpty) {
-        debugPrint('[Reconnect] Resolving ${server.name} via Cloudflare Global Tracker...');
-        try {
-          final resolved = await GlobalHubDiscovery.resolveHub(secretKeyOrToken: server.authToken!);
-          if (resolved != null) {
-            debugPrint('[Reconnect] Discovered ${server.name} via Global Tracker: ${resolved.publicIp}:${resolved.publicPort}');
-            success = await _probeIp(
-              client,
-              resolved.publicIp,
-              targetPort: resolved.publicPort,
-              authToken: server.authToken,
-              wanHost: resolved.publicIp,
-              wanPort: resolved.publicPort,
-            );
-            if (success) {
-              server.ip = resolved.publicIp;
-              server.port = resolved.publicPort;
-              server.wanHost = resolved.publicIp;
-              server.wanPort = resolved.publicPort;
-              server.lastSeen = DateTime.now();
-              await _persistConnectedServers();
-            }
-          }
-        } catch (e) {
-          debugPrint('[Reconnect] Global Tracker resolution error: $e');
-        }
-      }
-
       if (mounted) {
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2534,23 +2502,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _serverBindError = null;
       });
       server.listen(_handleWebDropRequest);
-
-      // Automated UPnP Port Mapping & Global Cloudflare Edge Announcement
-      if (!Platform.environment.containsKey('FLUTTER_TEST') && _hubSecretKey != null && _localIpAddress != null) {
-        GlobalHubDiscovery.startAnnouncement(
-          secretKey: _hubSecretKey!,
-          localIp: _localIpAddress!,
-          port: _webDropPort,
-          deviceName: _myDeviceName,
-        ).then((state) {
-          if (mounted) {
-            setState(() {
-              _globalWanStatus = state.statusSummary;
-              _isGlobalWanActive = state.isAnnounced && (state.isUpnpActive || state.publicIp != null);
-            });
-          }
-        });
-      }
     } catch (e) {
       debugPrint('Failed to start WebDrop HTTP server: $e');
       if (mounted) {
@@ -2566,9 +2517,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _webDropServer?.close(force: true);
     _webDropServer = null;
     _isWebDropServerRunning = false;
-    GlobalHubDiscovery.stopAnnouncement(port: _webDropPort);
-    _globalWanStatus = null;
-    _isGlobalWanActive = false;
     if (mounted) {
       setState(() {});
     }
@@ -3679,22 +3627,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _batteryOptimizationIgnored = isIgnored;
         });
       } catch (_) {}
-    }
-  }
-
-  Future<void> _toggleBackgroundService(bool enable) async {
-    setState(() => _backgroundSyncEnabled = enable);
-    _saveAppConfig();
-    if (Platform.isAndroid) {
-      try {
-        if (enable) {
-          await _bgChannel.invokeMethod('startService');
-        } else {
-          await _bgChannel.invokeMethod('stopService');
-        }
-      } catch (e) {
-        debugPrint('Background service toggle error: $e');
-      }
     }
   }
 
@@ -5154,7 +5086,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'This device is not listening for incoming backups.\nTurn the server ON above to start listening, enable router UPnP port mapping, and display connection QR code.',
+                            'This device is not listening for incoming backups.\nTurn the server ON above to start listening and display the connection QR code.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 12,
@@ -5214,47 +5146,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Text(
                         'Remote / WAN: $_serverRemoteWanUrl',
                         style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF12B5CB)),
-                      ),
-                    ],
-                    // Live Zero-Config Global WAN Status Badge (UPnP / STUN / Cloudflare Tracker)
-                    if (_globalWanStatus != null) ...[
-                      const SizedBox(height: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: _isGlobalWanActive
-                              ? GooglePhotosColors.green.withValues(alpha: 0.12)
-                              : GooglePhotosColors.blue.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: _isGlobalWanActive
-                                ? GooglePhotosColors.green.withValues(alpha: 0.3)
-                                : GooglePhotosColors.blue.withValues(alpha: 0.3),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.public_rounded,
-                              color: _isGlobalWanActive ? GooglePhotosColors.green : GooglePhotosColors.blue,
-                              size: 13,
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                _globalWanStatus!,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: _isGlobalWanActive ? GooglePhotosColors.green : GooglePhotosColors.blue,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
                       ),
                     ],
                     const SizedBox(height: 4),
@@ -8096,14 +7987,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildBackgroundAndSpeedCard() {
+    final isOnline = _isServerEnabled && _isWebDropServerRunning;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
         side: BorderSide(
-          color: _backgroundSyncEnabled
+          color: isOnline
               ? Colors.green.shade400
-              : Colors.grey.shade400,
+              : (isDark ? const Color(0xFF5F6368) : Colors.grey.shade400),
           width: 1.5,
         ),
       ),
@@ -8112,90 +8005,78 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Status row with ON/OFF switch (Tapping anywhere toggles)
-            InkWell(
-              onTap: () => _toggleBackgroundService(!_backgroundSyncEnabled),
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: _backgroundSyncEnabled
-                            ? Colors.green.shade100
-                            : Colors.grey.shade200,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        _backgroundSyncEnabled ? Icons.sync : Icons.sync_disabled,
-                        color: _backgroundSyncEnabled
-                            ? Colors.green.shade800
-                            : Colors.grey.shade700,
-                        size: 24,
-                      ),
+            // Background Keep-Alive Daemon status tied directly to server state (Single Master Switch)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isOnline
+                          ? (isDark ? const Color(0xFF0D652D) : Colors.green.shade100)
+                          : (isDark ? const Color(0xFF3C4043) : Colors.grey.shade200),
+                      shape: BoxShape.circle,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Wrap(
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            spacing: 6,
-                            runSpacing: 4,
-                            children: [
-                              const Text(
-                                'Background Auto-Sync',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: _backgroundSyncEnabled
-                                      ? Colors.green.shade50
-                                      : Colors.grey.shade100,
-                                  border: Border.all(
-                                    color: _backgroundSyncEnabled
-                                        ? Colors.green.shade400
-                                        : Colors.grey.shade400,
-                                  ),
-                                  borderRadius: BorderRadius.circular(6),
+                    child: Icon(
+                      isOnline ? Icons.bolt_rounded : Icons.power_settings_new_rounded,
+                      color: isOnline
+                          ? (isDark ? Colors.green.shade200 : Colors.green.shade800)
+                          : (isDark ? const Color(0xFF9AA0A6) : Colors.grey.shade700),
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            const Text(
+                              'Background Keep-Alive Daemon',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isOnline
+                                    ? (isDark ? const Color(0xFF0D652D).withValues(alpha: 0.3) : Colors.green.shade50)
+                                    : (isDark ? const Color(0xFF3C4043) : Colors.grey.shade100),
+                                border: Border.all(
+                                  color: isOnline
+                                      ? Colors.green.shade400
+                                      : (isDark ? const Color(0xFF5F6368) : Colors.grey.shade400),
                                 ),
-                                child: Text(
-                                  _backgroundSyncEnabled ? 'ACTIVE 24/7' : 'OFF (SAVER)',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                    color: _backgroundSyncEnabled
-                                        ? Colors.green.shade800
-                                        : Colors.grey.shade800,
-                                  ),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                isOnline ? 'RUNNING 24/7' : 'OFF (ZERO DRAIN)',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color: isOnline
+                                      ? (isDark ? Colors.green.shade300 : Colors.green.shade800)
+                                      : (isDark ? const Color(0xFFBDC1C6) : Colors.grey.shade800),
                                 ),
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _backgroundSyncEnabled
-                                ? 'Syncs photos & drops automatically even when screen is locked.'
-                                : 'Zero background battery drain. Syncs only when app is open.',
-                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                          ),
-                        ],
-                      ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          isOnline
+                              ? 'Keeps server awake with wakelock & Wi-Fi lock so other devices can sync anytime.'
+                              : 'Server is currently OFF. Daemon is asleep with zero battery drain.',
+                          style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF9AA0A6) : Colors.grey.shade600),
+                        ),
+                      ],
                     ),
-                    IgnorePointer(
-                      child: Switch.adaptive(
-                        value: _backgroundSyncEnabled,
-                        activeTrackColor: Colors.green.shade300,
-                        activeThumbColor: Colors.green.shade800,
-                        onChanged: null,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
 

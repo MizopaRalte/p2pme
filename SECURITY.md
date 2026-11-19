@@ -125,19 +125,12 @@
   * **Scoped Token Authorization:** Every HTTP probe and sweep request carries the cryptographic secret token assigned during initial pairing. Unauthenticated or mis-matched nodes on the subnet are ignored, preventing rogue machines from hijacking paired sessions.
   * **Kernel Multicast Lock Protection:** The background service uses `WifiManager.MulticastLock` with strict lifecycle cleanup on service stop, ensuring battery efficiency while eliminating silent packet drops on 24/7 listener nodes.
 
-### Q. Zero-Knowledge Global Tracker Threat Model & UPnP Router Isolation
-* **Risk:** Exposure of server endpoints, credential leakage, or unauthorized WAN traversal via public discovery endpoints.
-* **Mitigation:**
-  * **One-Way SHA-256 Hub Identity:** The global tracker identifier is derived as `sha256(hub_secret_key)`. Because SHA-256 is cryptographically one-way and collision-resistant, knowing the `hub_id` reveals zero information about the actual secret key used to authenticate transfers.
-  * **Zero Data Relay & Zero Central Logs:** The Cloudflare tracker functions purely as a dynamic coordinate registry (< 1 KB per entry). It never relays files, payloads, or metadata. All file transfers occur directly peer-to-peer over mutual TLS/token-protected sockets.
-  * **Strict 15-Minute Ephemeral TTL:** All announcements expire after 900 seconds. If a server stops or switches off, its external address disappears automatically from the global registry.
-  * **Explicit UPnP Port Cleanup:** When the user switches roles or stops the Server Hub, `UpnpService.unmapPort()` issues a `DeletePortMapping` SOAP action to close the opened port on the home router.
-
-### R. Default-Off Server Exposure Minimization & User Sovereignty
+### Q. Default-Off Server Exposure Minimization & User Sovereignty
 * **Risk:** Unintended port exposure or background battery consumption on devices that only intend to send files or run on public Wi-Fi networks.
 * **Mitigation:**
-  * **Secure-by-Default (Zero Unsolicited Listeners):** The Server Hub engine is OFF by default across all platforms upon installation or role initialization (`_isServerEnabled = false`). No TCP ports are bound, no UPnP router holes are opened, and no background listener services are started until the user explicitly toggles the master switch ON.
-  * **Persistent User Intent (`serverEnabled`):** When enabled, state is securely persisted in the application documents sandbox so it remains on across restarts. When toggled OFF, sockets, router port mappings, and background services are completely torn down, ensuring the device returns to zero listening attack surface.
+  * **Secure-by-Default (Zero Unsolicited Listeners):** The Server Hub engine is OFF by default across all platforms upon installation or role initialization (`_isServerEnabled = false`). No TCP ports are bound, and no background listener services are started until the user explicitly toggles the master switch ON.
+  * **Persistent User Intent (`serverEnabled`):** When enabled, state is securely persisted in the application documents sandbox so it remains on across restarts. When toggled OFF, sockets and background services are completely torn down, ensuring the device returns to zero listening attack surface.
+  * **No Dropper or High-Risk Permissions:** Android builds strictly omit `REQUEST_INSTALL_PACKAGES` and router-manipulation code, ensuring clean compliance with Play Protect security verification (`verdict 0 / ALLOW`).
 
 ---
 

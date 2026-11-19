@@ -67,18 +67,12 @@ To guarantee 100% connectivity between any two devices globally—whether across
 | :--- | :--- | :--- | :--- | :--- |
 | **Tier 0** | **Direct USB Cable** | CDC-NCM / RNDIS USB Tethering / Hotspot point-to-point link | Sub-millisecond / Full USB wire-speed (100–480+ Mbps) | **Yes** (100% offline, 0% Wi-Fi) |
 | **Tier 1** | **Direct LAN** | mDNS + Multicast UDP discovery (`MulticastLock`) | Sub-millisecond / Full LAN wire-speed (1–10 Gbps) | **Yes** (100% offline) |
-| **Tier 2** | **Automated Global WAN** | Native UPnP / NAT-PMP IGD + Cloudflare Tracker (`/api/hub/*`) | Internet ping / Full ISP line speed (No VPN needed) | No |
-| **Tier 3** | **Encrypted Mesh / Tailscale** | Tailscale / WireGuard / IPv6 / Manual Port Forward | Internet ping / Full ISP & 5G line speed | No |
-| **Tier 4** | **Direct WAN (Punched)** | Google STUN + UDP Hole Punching | Direct UDP path / Full ISP line speed | No |
-| **Tier 5** | **Encrypted Relay** | DERP packet forwarder / Zero-Knowledge Relay | Proxied / Bandwidth capped by relay | No |
+| **Tier 2** | **Encrypted Mesh / Remote WAN** | Tailscale / WireGuard / IPv6 / Configured Remote Host | Internet ping / Full ISP & 5G line speed | No |
 
 ### Connection Fallback Lifecycle
 1. **Physical Cable First (Tier 0):** If a USB-C or Lightning cable connects the two devices (with USB tethering enabled on mobile), P2Pme discovers the virtual CDC-NCM/RNDIS adapter and locks to the physical link-local socket, bypassing Wi-Fi entirely.
 2. **Local Wi-Fi Next (Tier 1):** When two devices pair via an authentication ticket or QR code, both nodes announce themselves to the local subnet via mDNS and UDP broadcast beacons. If both peers are on the same Wi-Fi, the connection locks to the LAN address for maximum bandwidth.
-3. **Automated Zero-Config Global WAN (Tier 2):** When a sender switches from home Wi-Fi to cellular (5G/LTE), local subnet pings fail. The client automatically queries the Cloudflare zero-knowledge edge tracker (`https://p2pme.pages.dev/api/hub/resolve?hub_id=<sha256>`). The home router's automated UPnP/NAT-PMP port mapping forwards traffic directly to the Server Hub with zero manual setup.
-4. **Mesh & Remote WAN Failover (Tier 3):** If UPnP is disabled on the home router, the client falls back to the paired node's WAN/Mesh address (e.g. Tailscale IP or public domain) configured in the pairing ticket or manual remote dialog.
-5. **STUN & Hole Punching (Tier 4):** If peers are on separate uncoordinated networks, STUN probes public IP/port candidates and initiates simultaneous UDP hole punching.
-6. **Encrypted Relay (Tier 5):** If carrier-grade symmetric NAT (CGNAT) on mobile data blocks direct hole punches, peers communicate through an encrypted DERP relay session where data is protected by Noise/TLS 1.3.
+3. **Encrypted Mesh & Remote WAN (Tier 2):** When a sender switches from home Wi-Fi to cellular (5G/LTE), local subnet pings fail. The client automatically connects to the paired node's WAN/Mesh address (e.g. Tailscale IP or public domain) embedded in the pairing ticket or manual remote dialog.
 
 ---
 
@@ -159,7 +153,7 @@ sequenceDiagram
     end
 ```
 
-1. **UDP Broadcast Beacon & MulticastLock:** Nodes operating as Receiver or 24/7 Server Hub broadcast discovery beacons on UDP port `42424`. The Server Hub engine is **OFF by default** on all platforms upon installation or role initialization (`_isServerEnabled = false`). Only when the user explicitly turns the Server toggle switch ON does the app bind to port `45455`, begin UDP discovery broadcasting, map router ports via UPnP, announce to the Cloudflare edge tracker, and acquire Android `WifiManager.MulticastLock`. This setting is persisted in `.p2pme_config.json`, ensuring the server stays active always across app launches and device reboots until the user manually toggles it OFF. When toggled OFF, sockets close, router port mappings are immediately deleted via UPnP, and beacons cease.
+1. **UDP Broadcast Beacon & MulticastLock (Single Authoritative Switch):** Nodes operating as Receiver or 24/7 Server Hub broadcast discovery beacons on UDP port `42424`. The Server Hub engine is **OFF by default** on all platforms upon installation or role initialization (`_isServerEnabled = false`). Only when the user explicitly turns the Server toggle switch ON does the app bind to port `45455`, begin UDP discovery broadcasting, and start the Android foreground keep-alive service (`P2PmeSyncService` with `WakeLock`, `WifiLock`, and `MulticastLock`). This setting is persisted in `.p2pme_config.json`, ensuring the server stays active always across app launches and device reboots until the user manually toggles it OFF. When toggled OFF, sockets close, the background daemon cleanly stops (zero background battery drain), and beacons cease. All redundant or conflicting switches have been eliminated.
 2. **Persistent Connected Servers Registry:** Senders persist all successfully paired servers to `.connected_servers.json`. Unlike transient scan caches, this registry survives app restarts, device reboots, and network changes.
 3. **Dynamic 3-Phase Reconnection Engine:** When a sender leaves and returns home (or when the home router DHCP assigns a new IP to the server), the sender executes a systematic 3-phase reconnection:
    * **Phase 1 (Direct Ping):** Tests the last-known IP via `GET /api/info` with the saved pairing token.
