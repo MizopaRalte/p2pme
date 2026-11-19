@@ -914,8 +914,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isGlobalWanActive = false;
 
   // App Update Checker
-  int _currentVersionCode = 17;
-  String _currentVersionName = '1.3.0';
+  int _currentVersionCode = 18;
+  String _currentVersionName = '1.3.1';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
