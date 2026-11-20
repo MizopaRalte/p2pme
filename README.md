@@ -93,7 +93,7 @@
 | **Local Wi-Fi Link Speed** | **80 – 110+ MB/s** | Limited by Internet upload (2–10 MB/s) | 25 – 50 MB/s |
 | **16 MB Payload Benchmark** | **1.33 seconds** | 12 – 25 seconds | 3 – 5 seconds |
 | **Cloud Custody** | **0% (Direct Peer-to-Peer)** | 100% (Third-party servers) | 0% (Direct Browser P2P) |
-| **Data Encryption** | Mutual TLS 1.3 + BLAKE3 | Provider-managed | DTLS 1.2 |
+| **Data Encryption** | Peer-Verified TLS 1.3 (Ring Crypto) + BLAKE3 | Provider-managed | DTLS 1.2 |
 
 ---
 
@@ -129,13 +129,16 @@ P2Pme/
 │   ├── lib/              # UI screens, local WebDrop server, background service bindings
 │   └── android/          # Native Android foreground service (P2PmeSyncService)
 ├── crates/
-│   ├── p2pme-core/       # Core Rust engine (QUIC transport, BLAKE3 chunker, SQLite catalog)
+│   ├── p2pme-core/       # Core Rust engine (QUIC transport, BLAKE3 chunker, SQLite catalog, STUN)
+│   ├── p2pme-ffi/        # C ABI / Dart FFI bindings for mobile and desktop runtimes
 │   └── p2pme-cli/        # Native Windows & Linux CLI daemon (p2pme.exe)
-├── web-pwa/              # Standalone Cloudflare Pages Web PWA (Zero-install WebRTC drop)
-├── ARCHITECTURE.md       # 4-tier network transport specification
+├── functions/            # Cloudflare Pages edge Functions (Zero-custody STUN & PIN rendezvous)
+├── web-pwa/              # Standalone Cloudflare Pages Web PWA (Zero-install WebRTC drop & portal)
+├── scripts/              # Automated cross-platform release pipeline (release.py, verify-release.py)
+├── ARCHITECTURE.md       # 4-tier network transport & signaling specification
 ├── PROTOCOL.md           # Wire framing, tickets, drop RPC, and sync catalog schema
-├── DEPLOYMENT.md         # Cloudflare Pages & GitHub Releases hosting guide
-└── SECURITY.md           # Cryptographic primitives & threat model
+├── DEPLOYMENT.md         # Automated zero-disparity release & hosting guide
+└── SECURITY.md           # Cryptographic primitives, threat model & safety invariants
 ```
 
 ---
@@ -147,17 +150,17 @@ Open the deployed web app or run locally:
 ```powershell
 cd web-pwa
 # Test locally
-npx serve .
-# Or deploy in 1 command
-npx wrangler pages deploy . --project-name p2pme
+npx serve web-pwa
+# Or deploy to Cloudflare Pages edge in 1 command
+npx wrangler pages deploy web-pwa --project-name p2pme --branch main
 ```
 
 ### 2. Android App
 ```powershell
 cd app
 flutter pub get
-flutter build apk --debug
-adb install build/app/outputs/flutter-apk/app-debug.apk
+flutter build apk --split-per-abi
+adb install build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
 ### 3. Windows Desktop App (Portable — No Install)
@@ -175,16 +178,25 @@ p2pme.exe receive <TICKET> C:\path\to\destination
 p2pme.exe share C:\Photos --backup
 ```
 
+### 4. Automated Cross-Platform Release Pipeline
+To compile, sign, and release across Android, iOS, Windows, AltStore, and Cloudflare Pages in one automated command:
+```powershell
+python scripts/release.py <version> "<release_notes>"
+```
+This triggers local compilation, tags Git, orchestrates macOS cloud runner for genuine iOS IPA compilation, updates `altstore-source.json` and `version.json`, deploys edge assets, and publishes the official GitHub Release with verified checksums.
+
 ---
 
 ## Security & Privacy
 
 * **Zero Cloud Custody:** Your data never touches any intermediate cloud server or database.
-* **Mutual TLS 1.3 & DTLS 1.2 Encryption:** All QUIC network streams and WebRTC data channels are encrypted end-to-end with forward secrecy.
+* **Peer-Verified TLS 1.3 & DTLS 1.2:** All QUIC network streams and WebRTC data channels are encrypted end-to-end with cryptographic handshake signature verification against pinned certificate public keys.
 * **BLAKE3 Content Integrity:** Every 256 KB chunk is cryptographically hashed and verified against bit rot and tampering.
-* **128-Bit Ephemeral Tokens:** Dynamic one-time secrets prevent local network port scanning or unauthorized uploads.
+* **256-Bit CSPRNG Ephemeral & Session Tokens:** Dynamic secrets prevent local network port scanning or unauthorized uploads.
 * **256-Bit CSPRNG Hub Rotation:** 1-tap cryptographic rotation for Server Hub keys instantly revokes prior links and QR codes with zero server collision.
 * **BLAKE3 Folder Ticket Rotation:** On-demand folder ticket re-signing permanently retires compromised pairing tokens.
+* **Wire Protocol Message Cap:** Strict 32 MB ceiling on inbound messages and RPC frames, eliminating memory exhaustion and DoS attacks.
+* **Hash-Verified Safe Tombstones:** Local file hashes are verified before applying remote deletion tombstones, preventing unauthorized file wiping.
 
 ---
 

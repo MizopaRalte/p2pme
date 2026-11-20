@@ -111,7 +111,7 @@
 ### L. Non-Destructive File Collision Prevention & Data Immutability Guarantee
 * **Risk:** Adversarial or accidental file collision where an incoming asset overwrites an existing file of the same name (e.g. `IMG_0001.JPG`), causing irrecoverable user data loss.
 * **Mitigation:**
-  * **Zero-Overwrite Invariant:** P2Pme enforces non-destructive file collision handling via `_resolveUniqueFilePath`. When a destination file exists, the system automatically preserves the original and renames the incoming copy with an ISO timestamp suffix (`<base>_<YYYYMMDD>_<HHMMSS>.<ext>`).
+  * **Zero-Overwrite Invariant:** P2Pme enforces non-destructive file collision handling via `_resolveUniqueFilePath`. When a destination file exists, the system automatically preserves the original and renames the incoming copy with an ISO timestamp suffix including millisecond precision (`<base>_<YYYYMMDD>_<HHMMSS_mmm>.<ext>`), eliminating race conditions in rapid batch photo uploads.
   * **Path Traversal Sanitization:** Before collision resolution, all filenames are stripped of directory traversal components (`../`, `..\`) and restricted to alphanumeric characters, hyphens, underscores, and periods.
 
 ### M. Android 11+ Scoped Storage & Explicit Permission Boundaries

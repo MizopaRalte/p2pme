@@ -1,100 +1,108 @@
-# Deployment Guide: P2Pme on Cloudflare Pages & GitHub Releases
+# Deployment & Release Guide: P2Pme Across All Platforms
 
-This guide walks through hosting **P2Pme** completely free of charge without managing cloud servers or submitting to app stores.
-
----
-
-## 1. Push Repository to GitHub
-
-### Step 1: Create a GitHub Repository
-1. Log into your [GitHub Account](https://github.com/).
-2. Click **New Repository**.
-3. Name it `P2Pme` (choose Public or Private).
-4. Do NOT initialize with a README (we already have one).
-5. Click **Create repository**.
-
-### Step 2: Initialize & Push from Local Machine
-Open your terminal in `e:\P2Pme`:
-```powershell
-cd e:\P2Pme
-
-# Initialize git
-git init -b main
-
-# Add all files
-git add .
-
-# Create initial commit
-git commit -m "feat: initial commit of P2Pme core engine, Flutter app, and Cloudflare Web PWA"
-
-# Link to your remote GitHub repo
-git remote add origin https://github.com/MizopaRalte/p2pme.git
-
-# Push to main branch
-git push -u origin main
-```
+This guide documents the architecture and operational procedures for deploying **P2Pme** to Cloudflare Pages, GitHub Releases, and across all target platforms with **Zero Platform Disparity**.
 
 ---
 
-## 2. Deploy Web PWA to Cloudflare Pages (100% Free)
+## 1. Architecture & Hosting Overview
 
-Cloudflare Pages provides global HTTPS hosting, instant updates on every Git push, and 0 server maintenance.
+P2Pme operates with **Zero Cloud Custody** and requires no central database or hosted server backend:
 
-### Option A: Via Cloudflare Dashboard (Recommended)
-1. Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/) and navigate to **Workers & Pages**.
-2. Click **Create application** &rarr; Select the **Pages** tab &rarr; Click **Connect to Git**.
-3. Authorize GitHub and select the **P2Pme** repository.
-4. Set the following build configuration:
+* **Edge CDN & Web PWA:** Hosted globally on [Cloudflare Pages](https://pages.cloudflare.com/) (`https://p2pme.pages.dev`). Serves the standalone PWA, edge signaling functions, and binary download assets.
+* **Edge Signaling Functions:** Serverless edge functions located in `functions/` (`api/drop/announce`, `api/drop/resolve`, `api/hub/register`, `api/hub/resolve`) providing transient zero-custody STUN and PIN rendezvous routing.
+* **Binary Distribution:** Official GitHub Releases host signed Android APKs, genuine macOS-compiled iOS IPAs, and Windows portable ZIPs with cryptographic SHA-256 checksums.
+* **iOS AltStore Source:** Published at `https://p2pme.pages.dev/altstore-source.json` for 1-tap installation and automated background refresh via AltStore and SideStore.
+
+---
+
+## 2. Cloudflare Pages Configuration
+
+### Option A: Automated Git Integration
+1. In Cloudflare Dashboard, navigate to **Workers & Pages** &rarr; **Create application** &rarr; **Pages** &rarr; **Connect to Git**.
+2. Select the `MizopaRalte/p2pme` repository.
+3. Build Settings:
    * **Project name:** `p2pme`
    * **Production branch:** `main`
    * **Framework preset:** `None`
    * **Build command:** *(leave empty)*
    * **Build output directory:** `web-pwa`
-5. Click **Save and Deploy**.
-6. Cloudflare will deploy your site and provide a permanent global URL:
-   👉 **`https://p2pme.pages.dev`**
-7. *(Optional)* Add your own custom domain (e.g. `p2pme.app` or `drop.yourdomain.com`) under **Custom domains** in Cloudflare.
+4. The root `functions/` directory is automatically detected and compiled as Cloudflare Pages Functions.
 
-### Option B: Via Wrangler CLI
-If you prefer deploying directly from your terminal:
+### Option B: Terminal Edge Deployment via Wrangler
+Deploying directly from local machine:
 ```powershell
-cd e:\P2Pme\web-pwa
-npx wrangler pages deploy . --project-name p2pme
+npx wrangler pages deploy web-pwa --project-name p2pme --branch main --commit-dirty=true
 ```
 
 ---
 
-## 3. Host Android APK & Windows EXE on GitHub Releases
+## 3. Mandatory One-Command Release Pipeline
 
-To give friends, family, and yourself a 1-tap download link for the native APK and Windows binary:
+In accordance with project engineering rules (`AGENTS.md` / `GEMINI.md`), **manual, piecemeal release steps are strictly prohibited**. All releases must be executed via the unified automation script:
 
-### Step 1: Prepare the Compiled Files
-1. **Android APK:** Located at `app/build/app/outputs/flutter-apk/app-debug.apk` (rename to `P2Pme.apk`).
-2. **Windows Desktop Binary:** Located at `target/release/p2pme.exe`.
+```powershell
+python scripts/release.py <version> "<release_notes>"
+```
 
-### Step 2: Create a GitHub Release
-1. In your GitHub repository, click **Releases** &rarr; **Draft a new release**.
-2. Set **Tag version** to `v1.0.0`.
-3. Set **Release title** to `P2Pme v1.0.0 - Native Android & Windows Release`.
-4. Drag and drop:
-   * `P2Pme.apk`
-   * `p2pme.exe`
-5. Click **Publish release**.
+### Example:
+```powershell
+python scripts/release.py 1.3.3 "Security hardening & global internet P2P transfer via STUN and edge signaling"
+```
 
-### Step 3: Direct Download Links
-Your friends and family can now download the apps directly:
-* **Android APK:** `https://github.com/MizopaRalte/p2pme/releases/latest/download/P2Pme.apk`
-* **Windows PC:** `https://github.com/MizopaRalte/p2pme/releases/latest/download/p2pme.exe`
-
-These direct links can also be pasted directly into `web-pwa/index.html` on the **Native Apps** tab.
+### What the Pipeline Enforces Sequentially:
+1. **Version Code Synchronization:** Bumps version strings and increments build codes in `pubspec.yaml`, `app/lib/main.dart`, `web-pwa/version.json`, and `web-pwa/index.html`.
+2. **Android Release Compilation:** Compiles signed split-per-abi release APKs (`cd app && flutter build apk --split-per-abi`). Generates SHA-256 checksums and places them in `web-pwa/downloads/`.
+3. **Synchronous Git Tagging:** Commits all version updates, creates an annotated Git tag (`vX.Y.Z`), and force-pushes `main` and tags to GitHub.
+4. **macOS Cloud Runner Orchestration:** The push triggers GitHub Actions workflow `.github/workflows/build-release.yml` on a `macos-latest` cloud runner with Xcode and Flutter.
+5. **iOS IPA Retrieval & Verification:** The script polls GitHub Actions, downloads the genuine macOS-compiled `p2pme-ios-ipa` artifact, validates its file size and SHA-256 checksum, and places it into `web-pwa/downloads/P2Pme-v<version>.ipa` and `P2Pme.ipa`.
+6. **AltStore Source & Version API Sync:** Updates `web-pwa/altstore-source.json` and `web-pwa/version.json` with matching version codes, release dates, exact byte counts, and SHA-256 hashes.
+7. **Cloudflare Pages Edge Deployment:** Deploys all static assets and the compiled `functions/` bundle to Cloudflare Pages edge via Wrangler.
+8. **Official GitHub Release Publication:** Creates or updates GitHub Release `vX.Y.Z` and attaches all 7 mandatory release assets:
+   - `P2Pme-v<version>.apk`
+   - `P2Pme.apk`
+   - `P2Pme-v<version>.ipa`
+   - `P2Pme.ipa`
+   - `P2Pme-Windows.zip`
+   - `P2Pme.apk.sha256`
+   - `P2Pme.ipa.sha256`
+9. **Final Metadata Commit:** Commits the finalized `altstore-source.json` and `version.json` to `main`.
+10. **Automated Online Verification Gate:** Runs `scripts/verify-release.py` to test remote HTTP endpoints and verify zero platform disparity.
 
 ---
 
-## 4. How iPhone Users Access P2Pme
+## 4. Post-Release Verification (`scripts/verify-release.py`)
 
-iPhone users do **not** need the App Store:
-1. Send them your Cloudflare Pages URL (e.g. `https://p2pme.pages.dev`).
-2. They open the link in Safari.
-3. They tap the **Share** button (the square with an arrow pointing up) &rarr; tap **Add to Home Screen**.
-4. P2Pme appears as a standalone app icon on their iPhone home screen, working full-screen with offline support!
+Run at any time to verify remote CDN and GitHub parity:
+```powershell
+python scripts/verify-release.py
+```
 
+Checks performed:
+- `https://p2pme.pages.dev/version.json` matches target version code.
+- `https://p2pme.pages.dev/altstore-source.json` matches version code and IPA SHA-256.
+- GitHub Release `vX.Y.Z` contains all 7 mandatory assets with matching filenames.
+
+---
+
+## 5. End-User Installation Guide
+
+### Android
+* Download `P2Pme.apk` from [p2pme.pages.dev](https://p2pme.pages.dev) or the GitHub Release.
+* Tap to install. Android 11+ users granting custom folder backup paths will be guided through Scoped Storage settings.
+
+### iOS (iPhone & iPad)
+1. **AltStore & SideStore (Recommended):**
+   * Add AltStore Source: `https://p2pme.pages.dev/altstore-source.json`.
+   * Tap install to sideload `P2Pme.ipa`. SideStore provides automated on-device Wi-Fi refreshes without requiring a PC.
+2. **Permanent Installation (TrollStore):**
+   * On iOS 14.0–17.0 devices supporting TrollStore (CoreTrust vulnerability), open `P2Pme.ipa` in TrollStore for permanent install with zero 7-day expiration.
+3. **Sideloadly (PC & Mac):**
+   * Drag `P2Pme.ipa` into Sideloadly and enable automatic Wi-Fi refresh.
+4. **Instant Safari Web PWA:**
+   * Open `https://p2pme.pages.dev` in Safari.
+   * Tap **Share** &rarr; **Add to Home Screen**. Full-screen photo browsing and 1-tap backup with zero install.
+
+### Windows Desktop (Portable)
+* Download `P2Pme-Windows.zip` from [p2pme.pages.dev](https://p2pme.pages.dev).
+* Extract the folder.
+* Double-click `Launch_P2Pme.cmd` or `p2pme_app.exe` for the Flutter desktop UI, or run `p2pme.exe` in PowerShell for the native CLI daemon.

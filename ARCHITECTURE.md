@@ -117,7 +117,7 @@ P2Pme is architected to operate without mandatory app store monopolies, supporti
 
 ### A. Web PWA (iOS & Desktop Browsers)
 * **Hosting:** Cloudflare Pages edge network (`https://p2pme.pages.dev`).
-* **Auto-Updates:** Service Worker (`sw.js`) with `self.skipWaiting()` and `self.clients.claim()` using a **Network-First** caching strategy. When a user opens the web app or iOS Home Screen PWA, updated assets are retrieved instantly in the background without user intervention.
+* **Auto-Updates & Offline-First:** Service Worker (`sw.js`) with `self.skipWaiting()` and `self.clients.claim()` using a **Cache-First (offline-first)** caching strategy with versioned cache (`p2pme-v20`). Static assets are served instantly from local cache for full offline operation. Dynamic API routes (`/api/`) and upload endpoints (`/upload`) bypass the cache for direct network streaming. When a new version is deployed to Cloudflare Pages edge, updated assets are retrieved and the cache automatically purges obsolete versions.
 
 ### B. Windows Portable Application
 * **Zero-Installation Architecture:** Distributed as a standalone zip archive (`P2Pme-Windows.zip`) containing `p2pme_app.exe` (Flutter desktop shell), `p2pme.exe` (Rust native engine daemon), and required runtime DLLs.
