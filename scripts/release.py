@@ -264,7 +264,7 @@ def main():
 
     # 11. Deploy to Cloudflare Pages
     log("Deploying all assets to Cloudflare Pages edge...")
-    run("npx wrangler pages deploy web-pwa --project-name p2pme --commit-dirty=true")
+    run("npx wrangler pages deploy web-pwa --project-name p2pme --branch main --commit-dirty=true")
 
     # 12. Publish or update GitHub Release with all assets
     log(f"Publishing official GitHub Release v{new_version}...")
