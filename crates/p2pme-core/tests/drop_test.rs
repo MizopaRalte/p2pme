@@ -205,3 +205,26 @@ async fn test_big_file_transfer_speed_and_throughput() {
     assert_eq!(std::fs::metadata(recv_big).unwrap().len(), file_size_bytes as u64);
 }
 
+#[tokio::test]
+async fn test_drop_ticket_payload_sanitizes_pin() {
+    let send_dir = tempdir().unwrap();
+    let node_db = tempdir().unwrap();
+
+    let doc_path = send_dir.path().join("secret.pdf");
+    std::fs::write(&doc_path, b"test content").unwrap();
+
+    let node = P2PNode::new(node_db.path(), 0).await.unwrap();
+    let ticket = node.create_drop(vec![doc_path]).await.unwrap();
+
+    // The in-memory struct holds the PIN for the sender UI
+    assert_eq!(ticket.pin_code.len(), 6);
+
+    // Finding C-2 Verification: The serialized payload must NOT leak the PIN!
+    let payload = ticket.to_string_payload().unwrap();
+    let decoded_ticket = p2pme_core::DropTicket::from_string_payload(&payload).unwrap();
+    assert_eq!(
+        decoded_ticket.pin_code, "",
+        "Exported DropTicket payload must have empty pin_code to prevent QR/ticket PIN leakage"
+    );
+}
+

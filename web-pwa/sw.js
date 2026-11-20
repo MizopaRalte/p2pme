@@ -1,5 +1,5 @@
-// P2Pme Service Worker - 100% Offline PWA Support
-const CACHE_NAME = 'p2pme-v16';
+// P2Pme Service Worker - 100% Offline PWA Support (v20)
+const CACHE_NAME = 'p2pme-v20';
 const ASSETS = [
   './',
   './index.html',
@@ -33,9 +33,25 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Network first, falling back to cache
+  const url = new URL(event.request.url);
+
+  // Bypass service worker cache for dynamic upload and API endpoints
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/upload') || url.pathname.includes('/downloads/')) {
+    return;
+  }
+
+  // Cache-First with Stale-While-Revalidate for static app assets
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
+    caches.match(event.request).then((cached) => {
+      const networkFetch = fetch(event.request).then((response) => {
+        if (response && response.status === 200 && response.type === 'basic') {
+          const toCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, toCache));
+        }
+        return response;
+      }).catch(() => cached);
+
+      return cached || networkFetch;
+    })
   );
 });
-

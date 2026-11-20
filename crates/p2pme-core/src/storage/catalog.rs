@@ -101,6 +101,9 @@ impl StateCatalog {
         folder_id: &str,
         base_dir: P,
     ) -> Result<Vec<TrackedFile>> {
+        // Automatically prune old tombstones (> 30 days) to prevent unbounded DB growth
+        self.prune_expired_tombstones(30 * 86400).ok();
+
         let base = base_dir.as_ref();
         let mut found_paths = HashSet::new();
         let mut scanned_files = Vec::new();
@@ -127,12 +130,39 @@ impl StateCatalog {
             let hash = if is_dir {
                 [0u8; 32]
             } else {
-                let manifest = crate::storage::chunker::Chunker::create_manifest(
-                    base,
-                    &rel_path,
-                    crate::storage::chunker::DEFAULT_CHUNK_SIZE,
-                )?;
-                manifest.file_hash
+                // Check if existing catalog entry has identical mtime and size to skip expensive re-hashing
+                let cached = self.conn.query_row(
+                    "SELECT content_hash, mtime_ns, file_size FROM tracked_files WHERE folder_id = ?1 AND relative_path = ?2",
+                    params![folder_id, &rel_path],
+                    |row| {
+                        let hash_blob: Vec<u8> = row.get(0)?;
+                        let mut h = [0u8; 32];
+                        h.copy_from_slice(&hash_blob);
+                        let m: u64 = row.get(1)?;
+                        let s: u64 = row.get(2)?;
+                        Ok((h, m, s))
+                    },
+                ).ok();
+
+                if let Some((cached_hash, cached_mtime, cached_size)) = cached {
+                    if cached_mtime == mtime_ns && cached_size == size {
+                        cached_hash
+                    } else {
+                        let manifest = crate::storage::chunker::Chunker::create_manifest(
+                            base,
+                            &rel_path,
+                            crate::storage::chunker::DEFAULT_CHUNK_SIZE,
+                        )?;
+                        manifest.file_hash
+                    }
+                } else {
+                    let manifest = crate::storage::chunker::Chunker::create_manifest(
+                        base,
+                        &rel_path,
+                        crate::storage::chunker::DEFAULT_CHUNK_SIZE,
+                    )?;
+                    manifest.file_hash
+                }
             };
 
             let now = std::time::SystemTime::now()
@@ -263,13 +293,50 @@ impl StateCatalog {
         Ok(list)
     }
 
-    /// Apply an incoming tombstone from a remote peer (delete file locally if present)
+    /// Prune tombstones older than max_age_secs (default 30 days) to prevent unbounded DB growth
+    pub fn prune_expired_tombstones(&mut self, max_age_secs: u64) -> Result<usize> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let cutoff = now.saturating_sub(max_age_secs);
+        let pruned = self.conn.execute(
+            "DELETE FROM tombstones WHERE deleted_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(pruned)
+    }
+
+    /// Apply an incoming tombstone from a remote peer (delete file locally if present and hash matches)
     pub fn apply_remote_tombstone<P: AsRef<Path>>(
         &mut self,
         base_dir: P,
         tombstone: &Tombstone,
     ) -> Result<()> {
         let full_path = base_dir.as_ref().join(&tombstone.relative_path);
+
+        // Verification Gate (Finding C-4): Only delete if local file hash matches the tombstone hash
+        let local_record = self.conn.query_row(
+            "SELECT content_hash FROM tracked_files WHERE folder_id = ?1 AND relative_path = ?2",
+            params![tombstone.folder_id, tombstone.relative_path],
+            |row| {
+                let hash_blob: Vec<u8> = row.get(0)?;
+                let mut hash = [0u8; 32];
+                hash.copy_from_slice(&hash_blob);
+                Ok(hash)
+            },
+        ).ok();
+
+        if let Some(local_hash) = local_record {
+            if local_hash != tombstone.deleted_hash {
+                tracing::warn!(
+                    "Tombstone hash mismatch for {}: local content does not match deleted version. Preserving local file.",
+                    tombstone.relative_path
+                );
+                return Ok(());
+            }
+        }
+
         if full_path.exists() {
             if full_path.is_file() {
                 std::fs::remove_file(&full_path).ok();
@@ -328,5 +395,36 @@ mod tests {
         let tombstones = catalog.list_tombstones(folder_id).unwrap();
         assert_eq!(tombstones.len(), 1);
         assert_eq!(tombstones[0].relative_path, "doc.txt");
+    }
+
+    #[test]
+    fn test_tombstone_hash_mismatch_preserves_file() {
+        let dir = tempdir().unwrap();
+        let folder_id = "test-folder-security";
+
+        let file = dir.path().join("safe.txt");
+        std::fs::write(&file, b"valuable data").unwrap();
+
+        let mut catalog = StateCatalog::in_memory().unwrap();
+        let scanned = catalog.scan_directory(folder_id, dir.path()).unwrap();
+        assert_eq!(scanned.len(), 1);
+        let actual_hash = scanned[0].content_hash;
+
+        // An attacker or stale peer tries to send a tombstone with an incorrect deleted_hash
+        let rogue_tombstone = Tombstone {
+            folder_id: folder_id.to_string(),
+            relative_path: "safe.txt".to_string(),
+            deleted_hash: [0xEEu8; 32], // Mismatched hash
+            deleted_at: 123456789,
+            deleted_by_node: "rogue_node".to_string(),
+        };
+
+        catalog.apply_remote_tombstone(dir.path(), &rogue_tombstone).unwrap();
+
+        // Verification Gate: The local file MUST NOT be deleted!
+        assert!(file.exists(), "Local file must be preserved on tombstone hash mismatch");
+        let tracked = catalog.list_files(folder_id).unwrap();
+        assert_eq!(tracked.len(), 1, "Tracked file entry must remain");
+        assert_eq!(tracked[0].content_hash, actual_hash);
     }
 }

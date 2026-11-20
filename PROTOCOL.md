@@ -32,8 +32,41 @@ Pairing between two devices (via QR code, clipboard string, or deep link) uses a
 ```
 
 * `access`: `"read_write"` or `"read_only"`.
-* `direct_addresses`: Discovered LAN and STUN public socket candidates.
+* `direct_addresses`: Discovered LAN and STUN public socket candidates (`stun.l.google.com:19302`).
 * `auth_token`: Ephemeral token for initial mutual handshake.
+
+---
+
+## 2.1. DropTicket & Ephemeral Drop Protocol
+
+Drop tickets define single-use or multi-recipient one-time file transfers:
+
+```json
+{
+  "version": 1,
+  "drop_id": "drop_4a9b...",
+  "pin_code": "",
+  "auth_token": "tok_9f8e...",
+  "node_id": "node_2c4d...",
+  "direct_addresses": [
+    "192.168.1.50:45454",
+    "203.0.113.195:45454"
+  ],
+  "files": [
+    {
+      "name": "photo.jpg",
+      "size": 4194304,
+      "blake3_hash": "a1b2...",
+      "chunk_count": 16
+    }
+  ],
+  "expires_at": 1795000600
+}
+```
+
+* **PIN Decoupling:** `pin_code` is sanitized to `""` in serialized payloads and QR codes. Receivers must input the 6-digit PIN out-of-band to unlock the session.
+* **Wire Message Bound:** Wire messages are strictly capped at `MAX_WIRE_MESSAGE_BYTES = 32 MB` to prevent memory exhaustion and DoS attacks.
+* **Cloudflare Edge Rendezvous:** Senders announce public candidates to `POST /api/drop/announce`. Receivers on separate networks resolve candidates via `GET /api/drop/resolve?pin=XXXXXX` before initiating direct QUIC streaming.
 
 ---
 

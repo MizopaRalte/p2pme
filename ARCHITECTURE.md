@@ -67,12 +67,14 @@ To guarantee 100% connectivity between any two devices globally—whether across
 | :--- | :--- | :--- | :--- | :--- |
 | **Tier 0** | **Direct USB Cable** | CDC-NCM / RNDIS USB Tethering / Hotspot point-to-point link | Sub-millisecond / Full USB wire-speed (100–480+ Mbps) | **Yes** (100% offline, 0% Wi-Fi) |
 | **Tier 1** | **Direct LAN** | mDNS + Multicast UDP discovery (`MulticastLock`) | Sub-millisecond / Full LAN wire-speed (1–10 Gbps) | **Yes** (100% offline) |
-| **Tier 2** | **Encrypted Mesh / Remote WAN** | Tailscale / WireGuard / IPv6 / Configured Remote Host | Internet ping / Full ISP & 5G line speed | No |
+| **Tier 2** | **Internet Direct (STUN + Edge Rendezvous)** | RFC 5389 STUN NAT traversal + Cloudflare edge rendezvous | Internet ping / Full broadband & 5G speed | No (Zero cloud custody) |
+| **Tier 3** | **Encrypted Mesh / Remote WAN** | Tailscale / WireGuard / IPv6 / Configured Remote Host | Internet ping / Full ISP & 5G line speed | No |
 
 ### Connection Fallback Lifecycle
 1. **Physical Cable First (Tier 0):** If a USB-C or Lightning cable connects the two devices (with USB tethering enabled on mobile), P2Pme discovers the virtual CDC-NCM/RNDIS adapter and locks to the physical link-local socket, bypassing Wi-Fi entirely.
 2. **Local Wi-Fi Next (Tier 1):** When two devices pair via an authentication ticket or QR code, both nodes announce themselves to the local subnet via mDNS and UDP broadcast beacons. If both peers are on the same Wi-Fi, the connection locks to the LAN address for maximum bandwidth.
-3. **Encrypted Mesh & Remote WAN (Tier 2):** When a sender switches from home Wi-Fi to cellular (5G/LTE), local subnet pings fail. The client automatically connects to the paired node's WAN/Mesh address (e.g. Tailscale IP or public domain) embedded in the pairing ticket or manual remote dialog.
+3. **Internet Direct via STUN & Edge Rendezvous (Tier 2):** When peers are on different networks (e.g. mobile 5G to home Wi-Fi), the node queries public STUN servers (`stun.l.google.com:19302`) to discover its external WAN socket. Drop candidates are announced to the Cloudflare edge rendezvous (`/api/drop/announce`), allowing the receiver to resolve candidates and initiate direct peer-to-peer QUIC transfer.
+4. **Encrypted Mesh & Remote WAN (Tier 3):** If carrier NAT blocks inbound UDP packets, peers route through private Tailscale mesh (`100.x.x.x`) or configured DDNS domain.
 
 ---
 
@@ -83,7 +85,12 @@ To guarantee 100% connectivity between any two devices globally—whether across
 * Each block is hashed using **BLAKE3**, offering hashing speeds exceeding 4 GB/s.
 * Out-of-order block streaming allows receiving devices to verify each block's cryptographic proof immediately upon arrival, enabling parallelized multi-stream downloads directly into pre-allocated sparse storage.
 
-### B. SQLite Metadata Catalog
+### B. High-Speed Mtime-Cached Scanning & Safe Tombstones
+* **Mtime Scanning Cache:** Directories are scanned against SQLite state; unmodified files matching both `mtime_ns` and `file_size` reuse cached BLAKE3 hashes, speeding up directory indexing by 100x and eliminating CPU/battery exhaustion during background replication.
+* **Tombstone Hash Matching:** Inbound tombstones are verified against local content hashes before deleting any local asset. If a local file has been modified or differs from the tombstone's deleted hash, deletion is refused.
+* **Automatic Pruning:** Tombstones older than 30 days are automatically garbage-collected.
+
+### C. SQLite Metadata Catalog
 The local catalog tracks state persistently using SQLite with Write-Ahead Logging (WAL):
 * `tracked_files`: Records file path, content hash, size, modification timestamp (`mtime`), and synchronization state.
 * `tombstones`: Records deletions. When a file is removed, its tombstone propagates across peers so the file is deleted on other devices instead of being treated as missing and re-downloaded.

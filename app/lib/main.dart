@@ -911,8 +911,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isScanningNearby = false;
 
   // App Update Checker
-  int _currentVersionCode = 19;
-  String _currentVersionName = '1.3.2';
+  int _currentVersionCode = 20;
+  String _currentVersionName = '1.3.3';
   bool _updateAvailable = false;
   String? _latestVersionName;
   String? _updateReleaseNotes;
@@ -9021,6 +9021,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _activeDropBytes = res['total_bytes'] ?? 0;
           _isCreatingDrop = false;
         });
+
+        // Announce candidate addresses to global rendezvous for cross-network connectivity
+        final pin = res['pin_code']?.toString();
+        if (pin != null && pin.isNotEmpty) {
+          final addrs = (res['direct_addresses'] as List?)?.map((e) => e.toString()).toList() ?? [];
+          _announceDropToRendezvous(
+            pin: pin,
+            dropId: res['drop_id']?.toString() ?? '',
+            nodeId: res['node_id']?.toString() ?? '',
+            addresses: addrs,
+            ticketPayload: res['ticket_payload']?.toString() ?? '',
+          );
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Quick Drop Ready! PIN: $_activeDropPin')),
         );
@@ -9036,6 +9050,72 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         SnackBar(content: Text('Exception: $e')),
       );
     }
+  }
+
+  Future<void> _announceDropToRendezvous({
+    required String pin,
+    required String dropId,
+    required String nodeId,
+    required List<String> addresses,
+    required String ticketPayload,
+  }) async {
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(Uri.parse('https://p2pme.pages.dev/api/drop/announce'));
+      req.headers.contentType = ContentType.json;
+      final body = jsonEncode({
+        'pin': pin,
+        'drop_id': dropId,
+        'node_id': nodeId,
+        'direct_addresses': addresses,
+        'ticket_payload': ticketPayload,
+      });
+      req.write(body);
+      final resp = await req.close();
+      debugPrint('[Rendezvous] Announce response status: ${resp.statusCode}');
+    } catch (e) {
+      debugPrint('[Rendezvous] Announce failed (offline or local only): $e');
+    }
+  }
+
+  Future<String?> _resolveDropFromRendezvous(String pin) async {
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.getUrl(Uri.parse('https://p2pme.pages.dev/api/drop/resolve?pin=${Uri.encodeComponent(pin)}'));
+      final resp = await req.close();
+      if (resp.statusCode == HttpStatus.ok) {
+        final body = await utf8.decoder.bind(resp).join();
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        final ticket = json['ticket_payload']?.toString();
+        if (ticket != null && ticket.isNotEmpty) {
+          debugPrint('[Rendezvous] Successfully resolved drop for PIN: $pin');
+          return ticket;
+        }
+      }
+    } catch (e) {
+      debugPrint('[Rendezvous] Resolve failed: $e');
+    }
+    return null;
+  }
+
+  String _friendlyDropError(String? raw) {
+    if (raw == null) return 'Authentication failed or drop expired';
+    if (raw.contains('Too many failed attempts') || raw.contains('lockout')) {
+      return 'Too many incorrect PIN attempts. This session was permanently destroyed.';
+    }
+    if (raw.contains('expired')) {
+      return 'This Quick Drop session has expired (10-minute time limit).';
+    }
+    if (raw.contains('Invalid PIN') || raw.contains('auth token')) {
+      return 'Incorrect 6-digit PIN. Please verify and try again.';
+    }
+    if (raw.contains('No reachable direct address')) {
+      return 'Cannot reach sender. Ensure sender has not closed the app or check internet connection.';
+    }
+    if (raw.contains('No active Quick Drop senders found on your local Wi-Fi')) {
+      return 'No active drop found on your network or online. Check that the 6-digit PIN is correct.';
+    }
+    return raw;
   }
 
   Future<void> _handleReceiveDrop() async {
@@ -9063,18 +9143,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
 
     try {
-      final res = P2PBridge.instance.receiveDrop(
-        ticket,
-        pinCode: pin.isNotEmpty ? pin : null,
-        destination: _receiveDestination,
-      );
+      var effectiveTicket = ticket;
+      Map<String, dynamic>? res;
+
+      // If user provided PIN and no ticket, try local LAN discovery first
+      if (effectiveTicket.isEmpty && pin.isNotEmpty) {
+        res = P2PBridge.instance.receiveDrop(
+          "",
+          pinCode: pin,
+          destination: _receiveDestination,
+        );
+
+        // If local LAN probe found no peer (separate network/5G), query global rendezvous
+        if (res == null || res['success'] != true) {
+          final wanTicket = await _resolveDropFromRendezvous(pin);
+          if (wanTicket != null && wanTicket.isNotEmpty) {
+            effectiveTicket = wanTicket;
+            res = P2PBridge.instance.receiveDrop(
+              effectiveTicket,
+              pinCode: pin,
+              destination: _receiveDestination,
+            );
+          }
+        }
+      } else {
+        res = P2PBridge.instance.receiveDrop(
+          effectiveTicket,
+          pinCode: pin.isNotEmpty ? pin : null,
+          destination: _receiveDestination,
+        );
+      }
 
       if (res != null && res['success'] == true) {
+        final result = res;
         setState(() {
           _isReceivingDrop = false;
           _receiveSuccess = true;
-          _receivedFiles = res['files_transferred'] ?? 0;
-          _receivedBytes = res['bytes_transferred'] ?? 0;
+          _receivedFiles = result['files_transferred'] ?? 0;
+          _receivedBytes = result['bytes_transferred'] ?? 0;
           _receiveMessage =
               'Downloaded and verified $_receivedFiles file(s) (${(_receivedBytes / 1024).toStringAsFixed(1)} KB) directly into $_receiveDestination. Sender session self-destructed.';
         });
@@ -9087,17 +9193,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           isSender: false,
         );
       } else {
+        final rawErr = res?['error'];
         setState(() {
           _isReceivingDrop = false;
           _receiveSuccess = false;
-          _receiveMessage = res?['error'] ?? 'Authentication failed or drop expired';
+          _receiveMessage = _friendlyDropError(rawErr);
         });
       }
     } catch (e) {
       setState(() {
         _isReceivingDrop = false;
         _receiveSuccess = false;
-        _receiveMessage = 'Error: $e';
+        _receiveMessage = _friendlyDropError('Error: $e');
       });
     }
   }

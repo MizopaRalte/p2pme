@@ -28,7 +28,10 @@ pub struct DropTicket {
 
 impl DropTicket {
     pub fn to_string_payload(&self) -> Result<String, serde_json::Error> {
-        let json = serde_json::to_string(self)?;
+        // Finding C-2: Clear PIN from exported payload so QR codes and tickets never leak the 6-digit PIN
+        let mut sanitized = self.clone();
+        sanitized.pin_code.clear();
+        let json = serde_json::to_string(&sanitized)?;
         Ok(data_encoding::BASE64URL_NOPAD.encode(json.as_bytes()))
     }
 
@@ -124,12 +127,12 @@ impl DropManager {
 
         let drop_id = format!(
             "drop_{}",
-            &blake3::hash(&rand::random::<[u8; 16]>()).to_hex()[..12]
+            blake3::hash(&rand::random::<[u8; 32]>()).to_hex()
         );
         let pin_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
         let auth_token = format!(
             "tok_{}",
-            &blake3::hash(&rand::random::<[u8; 16]>()).to_hex()[..16]
+            blake3::hash(&rand::random::<[u8; 32]>()).to_hex()
         );
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -300,7 +303,13 @@ impl DropManager {
         std::fs::create_dir_all(dest)?;
 
         let auth_token = ticket.auth_token.clone();
-        let pin_code = pin.unwrap_or(&ticket.pin_code).to_string();
+        let pin_code = match pin {
+            Some(p) if !p.trim().is_empty() => p.trim().to_string(),
+            _ => ticket.pin_code.trim().to_string(),
+        };
+        if pin_code.is_empty() {
+            bail!("A 6-digit PIN must be provided to unlock this Quick Drop");
+        }
 
         let mut connection = None;
         let mut last_err = None;
@@ -417,22 +426,22 @@ pub fn resolve_unique_file_path(dest: &Path, original_name: &str) -> PathBuf {
     let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or(original_name);
     let ext = p.extension().and_then(|s| s.to_str());
 
-    let now_secs = std::time::SystemTime::now()
+    let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+        .unwrap_or_default();
+    let now_millis = format!("{}_{:03}", now.as_secs(), now.subsec_millis());
 
     let candidate_name = match ext {
-        Some(e) => format!("{}_{}.{}", stem, now_secs, e),
-        None => format!("{}_{}", stem, now_secs),
+        Some(e) => format!("{}_{}.{}", stem, now_millis, e),
+        None => format!("{}_{}", stem, now_millis),
     };
     let mut candidate = dest.join(&candidate_name);
 
     let mut counter = 1;
     while candidate.exists() {
         let candidate_name = match ext {
-            Some(e) => format!("{}_{}_{}.{}", stem, now_secs, counter, e),
-            None => format!("{}_{}_{}", stem, now_secs, counter),
+            Some(e) => format!("{}_{}_{}.{}", stem, now_millis, counter, e),
+            None => format!("{}_{}_{}", stem, now_millis, counter),
         };
         candidate = dest.join(&candidate_name);
         counter += 1;

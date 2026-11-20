@@ -28,12 +28,17 @@
 ### 🚀 1. Transfer Tab: Instant 1-Time Transfer (LAN & Internet)
 * **Nearby Wi-Fi 1-Tap Beam:** Automatically discovers active devices on your local network. Tap any nearby device to send files directly over full-speed Wi-Fi without typing pins or scanning codes.
 * **Smart Adapter Filtering & Subnet Sweep:** Filters out virtual VPN/tunnel adapters (WireGuard, AdGuard, OpenVPN) to probe real physical network interfaces, with manual "Add by IP" fallback.
+* **Global Internet P2P NAT Traversal (STUN + Edge Rendezvous):** Nodes automatically discover their external public WAN sockets via asynchronous STUN (RFC 5389 / `stun.l.google.com:19302`). Ephemeral 6-digit PIN drops announce candidate endpoints to Cloudflare edge rendezvous (`/api/drop/announce`), allowing receivers on separate networks or 5G cellular to connect directly peer-to-peer with zero cloud custody.
 * **6-Digit PIN & WebDrop Over Internet:** Send to any device worldwide with a 6-digit PIN code or zero-install browser link (`https://p2pme.pages.dev`).
+* **Decoupled PIN Protection:** 6-digit PIN codes are strictly excluded from exported DropTicket payloads and QR codes, ensuring intercepted ticket links cannot be unlocked without the sender's PIN.
 * **Self-Destructing Ephemeral Security:** 3 incorrect PIN attempts wipe the session instantly; sessions automatically expire in 10 minutes.
-* **Non-Destructive File Collision Prevention:** Incoming duplicate files never overwrite existing files. Duplicate names are automatically assigned an ISO timestamp suffix (`<base>_<YYYYMMDD>_<HHMMSS>.<ext>`) to guarantee zero silent overwrites and 100% historical data preservation.
+* **Non-Destructive File Collision Prevention:** Incoming duplicate files never overwrite existing files. Duplicate names are automatically assigned an ISO timestamp suffix (`<base>_<YYYYMMDD>_<HHMMSS_mmm>.<ext>`) to guarantee zero silent overwrites and 100% historical data preservation.
 * **Dedicated Receiver Destination Selection:** Choose where incoming files land before receiving, with a 1-tap option to save the chosen path as your persistent default destination.
 
 ### 🔄 2. Backup Tab: Continuous Background Sync
+* **High-Speed Mtime-Cached Scanning:** Skips redundant cryptographic re-hashing of unmodified files by comparing `mtime_ns` and `file_size` against the SQLite catalog, drastically reducing battery and CPU usage during background sync.
+* **Safe Remote Tombstone Verification:** Inbound deletion tombstones are strictly verified against local file hashes before removal. If a local file has been modified or does not match the tombstone's deleted hash, the local file is preserved.
+* **Automatic Tombstone Garbage Collection:** Automatically prunes tombstones older than 30 days to prevent unbounded database growth.
 * **Persistent Connected Servers Registry (`.connected_servers.json`):** Retains all previously paired servers indefinitely across app restarts, reboots, and network switches. Displays connected servers in both the Transfer and Backup tabs with live online/offline status, storage free telemetry, 1-tap "Send Here" beam, and a manual "Reconnect / Ping" button.
 * **Intelligent 3-Phase Auto-Reconnect Engine:** Recovers seamlessly when returning home or when the home router DHCP assigns a new IP address to the 24/7 server:
   * **Phase 1 (Direct Ping):** Instantly pings last-known IP via `/api/info`.

@@ -37,7 +37,8 @@ impl P2PNode {
         let node_id = if node_id_file.exists() {
             std::fs::read_to_string(&node_id_file)?.trim().to_string()
         } else {
-            let id = format!("node_{}", &blake3::hash(&rand::random::<[u8; 32]>()).to_hex()[..16]);
+            // 128-bit CSPRNG hex string (37 chars, valid DNS label length <= 63)
+            let id = format!("node_{}", &blake3::hash(&rand::random::<[u8; 32]>()).to_hex()[..32]);
             std::fs::write(&node_id_file, &id)?;
             id
         };
@@ -163,8 +164,13 @@ impl P2PNode {
         )
         .await?;
 
-        // Determine candidate direct addresses (LAN IPs + Localhost fallback)
-        let candidate_addrs = discover_local_addrs(self.transport.listening_port);
+        // Determine candidate direct addresses (LAN IPs + STUN Public WAN socket + Localhost fallback)
+        let mut candidate_addrs = discover_local_addrs(self.transport.listening_port);
+        if let Some(public_addr) = net::stun::discover_public_address(self.transport.listening_port).await {
+            if !candidate_addrs.contains(&public_addr) {
+                candidate_addrs.push(public_addr);
+            }
+        }
 
         let ticket = PairingTicket::new(
             self.node_id.clone(),
@@ -218,7 +224,12 @@ impl P2PNode {
 
     /// Create an ephemeral single-use Quick Drop session
     pub async fn create_drop(&self, file_paths: Vec<PathBuf>) -> Result<DropTicket> {
-        let candidate_addrs = discover_local_addrs(self.transport.listening_port);
+        let mut candidate_addrs = discover_local_addrs(self.transport.listening_port);
+        if let Some(public_addr) = net::stun::discover_public_address(self.transport.listening_port).await {
+            if !candidate_addrs.contains(&public_addr) {
+                candidate_addrs.push(public_addr);
+            }
+        }
         let ticket = self.drop_manager.create_drop(file_paths, candidate_addrs, &self.node_id).await?;
 
         // Start local discovery beacon so nearby peers can claim with just the 6-digit PIN

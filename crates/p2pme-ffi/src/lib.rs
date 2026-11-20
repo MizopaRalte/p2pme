@@ -86,7 +86,7 @@ pub extern "C" fn p2pme_share_folder(
     };
     let token = format!(
         "tok_{}",
-        &blake3::hash(&rand::random::<[u8; 16]>()).to_hex()[..12]
+        blake3::hash(&rand::random::<[u8; 32]>()).to_hex()
     );
 
     let res: anyhow::Result<String> = ctx.rt.block_on(async {
@@ -157,6 +157,7 @@ pub extern "C" fn p2pme_create_drop(
         let payload = ticket.to_string_payload()?;
         let total_bytes: u64 = ticket.files.iter().map(|f| f.size).sum();
 
+        let addrs: Vec<String> = ticket.direct_addresses.iter().map(|a| a.to_string()).collect();
         let resp_json = serde_json::json!({
             "success": true,
             "drop_id": ticket.drop_id,
@@ -164,6 +165,8 @@ pub extern "C" fn p2pme_create_drop(
             "ticket_payload": payload,
             "file_count": ticket.files.len(),
             "total_bytes": total_bytes,
+            "node_id": ticket.node_id,
+            "direct_addresses": addrs,
         });
 
         Ok::<String, anyhow::Error>(resp_json.to_string())

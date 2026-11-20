@@ -194,6 +194,30 @@
     } catch (_) {}
   }
 
+  // Persistent Transfer History (Finding L-2)
+  const TRANSFER_HISTORY_KEY = 'p2pme_transfer_history';
+  function recordTransferHistory(item) {
+    try {
+      const history = JSON.parse(localStorage.getItem(TRANSFER_HISTORY_KEY) || '[]');
+      history.unshift({
+        name: item.name,
+        size: item.size || 0,
+        timestamp: Date.now(),
+        direction: item.direction || 'sent',
+        peer: item.peer || 'Peer',
+      });
+      localStorage.setItem(TRANSFER_HISTORY_KEY, JSON.stringify(history.slice(0, 50)));
+    } catch (_) {}
+  }
+
+  function getTransferHistory() {
+    try {
+      return JSON.parse(localStorage.getItem(TRANSFER_HISTORY_KEY) || '[]');
+    } catch (_) {
+      return [];
+    }
+  }
+
   let skipAlreadyBackedUp = true;
   window.toggleSkipBackedUp = function(checked) {
     skipAlreadyBackedUp = checked;
@@ -1190,6 +1214,14 @@
     }
 
     markFilesBackedUp(toSend.slice(0, successCount));
+    toSend.slice(0, successCount).forEach(f => {
+      recordTransferHistory({
+        name: f.name,
+        size: f.size,
+        direction: 'sent',
+        peer: hub.name,
+      });
+    });
     releaseWakeLock();
     selectedFiles = [];
     renderSelectedFiles();

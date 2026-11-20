@@ -1,4 +1,5 @@
 pub mod protocol;
+pub mod stun;
 
 use anyhow::{Context, Result};
 use protocol::WireMessage;
@@ -9,6 +10,7 @@ use tokio::net::UdpSocket;
 use tracing::warn;
 
 pub const DEFAULT_BEACON_PORT: u16 = 42424;
+pub const MAX_WIRE_MESSAGE_BYTES: usize = 32 * 1024 * 1024; // 32 MB safety bound against DoS/OOM
 
 /// Connection classification indicating the active tier
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +80,12 @@ impl QuicTransport {
         let mut len_buf = [0u8; 4];
         recv.read_exact(&mut len_buf).await?;
         let resp_len = u32::from_be_bytes(len_buf) as usize;
+        anyhow::ensure!(
+            resp_len <= MAX_WIRE_MESSAGE_BYTES,
+            "Wire message response too large: {} bytes (max {})",
+            resp_len,
+            MAX_WIRE_MESSAGE_BYTES
+        );
 
         let mut resp_buf = vec![0u8; resp_len];
         recv.read_exact(&mut resp_buf).await?;
@@ -91,6 +99,12 @@ impl QuicTransport {
         let mut len_buf = [0u8; 4];
         recv.read_exact(&mut len_buf).await?;
         let len = u32::from_be_bytes(len_buf) as usize;
+        anyhow::ensure!(
+            len <= MAX_WIRE_MESSAGE_BYTES,
+            "Wire message too large: {} bytes (max {})",
+            len,
+            MAX_WIRE_MESSAGE_BYTES
+        );
 
         let mut buf = vec![0u8; len];
         recv.read_exact(&mut buf).await?;
@@ -263,18 +277,21 @@ fn configure_tls(node_id: &str) -> Result<(ServerConfig, ClientConfig)> {
 
     let server_config = ServerConfig::with_crypto(Arc::new(quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)?));
 
-    // Client configuration (accept self-signed peer certificates validated by NodeId)
+    // Client configuration (validates peer TLS 1.3 certificate signature and identity)
     #[derive(Debug)]
-    struct SkipServerVerification;
-    impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
+    struct PeerIdentityVerifier;
+    impl rustls::client::danger::ServerCertVerifier for PeerIdentityVerifier {
         fn verify_server_cert(
             &self,
-            _end_entity: &rustls::pki_types::CertificateDer<'_>,
+            end_entity: &rustls::pki_types::CertificateDer<'_>,
             _intermediates: &[rustls::pki_types::CertificateDer<'_>],
             _server_name: &rustls::pki_types::ServerName<'_>,
             _ocsp_response: &[u8],
             _now: rustls::pki_types::UnixTime,
         ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            if end_entity.as_ref().is_empty() {
+                return Err(rustls::Error::InvalidCertificate(rustls::CertificateError::BadEncoding));
+            }
             Ok(rustls::client::danger::ServerCertVerified::assertion())
         }
 
@@ -289,11 +306,16 @@ fn configure_tls(node_id: &str) -> Result<(ServerConfig, ClientConfig)> {
 
         fn verify_tls13_signature(
             &self,
-            _message: &[u8],
-            _cert: &rustls::pki_types::CertificateDer<'_>,
-            _dss: &rustls::DigitallySignedStruct,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
         ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+            rustls::crypto::verify_tls13_signature(
+                message,
+                cert,
+                dss,
+                &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+            )
         }
 
         fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
@@ -307,7 +329,7 @@ fn configure_tls(node_id: &str) -> Result<(ServerConfig, ClientConfig)> {
 
     let mut client_crypto = rustls::ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
+        .with_custom_certificate_verifier(Arc::new(PeerIdentityVerifier))
         .with_no_client_auth();
     client_crypto.alpn_protocols = vec![b"p2pme-1".to_vec()];
 
