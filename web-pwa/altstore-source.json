@@ -37,6 +37,24 @@
       "beta": false,
       "versions": [
         {
+          "version": "1.3.3",
+          "buildVersion": "20",
+          "date": "2026-11-20",
+          "localizedDescription": "Security hardening & global internet P2P transfer via STUN and edge signaling",
+          "downloadURL": "https://p2pme.pages.dev/downloads/P2Pme-v1.3.3.ipa",
+          "size": 7663167,
+          "sha256": "3bdd6c436edd428c02cffa1736db9ac938727be519486bcb8ea06f8852431314",
+          "minOSVersion": "15.0",
+          "appPermissions": {
+            "entitlements": [],
+            "privacy": {
+              "NSPhotoLibraryUsageDescription": "P2Pme needs access to your photos to automatically back up your camera roll to your home server.",
+              "NSPhotoLibraryAddUsageDescription": "P2Pme needs permission to save received photos and videos to your photo library.",
+              "NSLocalNetworkUsageDescription": "P2Pme discovers and transfers with your 24/7 home server and nearby peers directly over Wi-Fi."
+            }
+          }
+        },
+        {
           "version": "1.3.2",
           "buildVersion": "19",
           "date": "2026-11-19",
